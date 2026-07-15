@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import socket
 import subprocess
+import sys
 import time
 
 import httpx
@@ -38,7 +39,16 @@ def client(tmp_path: Path) -> Generator[httpx.Client, None, None]:
 
     env = os.environ.copy()
     process = subprocess.Popen(
-        [".venv/bin/uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", str(port)],
+        [
+            sys.executable,
+            "-m",
+            "uvicorn",
+            "app.main:app",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(port),
+        ],
         cwd=Path(__file__).resolve().parents[1],
         env=env,
         stdout=subprocess.DEVNULL,
