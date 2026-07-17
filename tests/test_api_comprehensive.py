@@ -164,6 +164,7 @@ def test_protected_api_routes_reject_unauthenticated_requests(client: httpx.Clie
     protected_gets = [
         "/api/me",
         "/api/auth/me",
+        "/api/profile",
         "/api/people",
         "/api/people/1",
         "/api/places",
@@ -182,6 +183,7 @@ def test_protected_api_routes_reject_unauthenticated_requests(client: httpx.Clie
         "/api/pulls/random",
         "/api/pulls/daily?day=2026-07-11",
         "/api/media",
+        "/api/media/previews?pullable_id=1",
         "/api/media/1",
     ]
     for path in protected_gets:

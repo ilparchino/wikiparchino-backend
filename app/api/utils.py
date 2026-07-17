@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from typing import Any, TypeVar
 
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.media_storage import MediaStorageError, StagedMediaDeletion, stage_media_deletion
-from app.models import AuditLog, EntityType, Epoch, Event, MediaAsset, Person, Place, Pullable, UserAccount, utcnow
+from app.models import ActivityAction, ActivityLog, EntityType, Epoch, Event, MediaAsset, Person, Place, Pullable, UserAccount
 
 ModelT = TypeVar("ModelT", Person, Place, Epoch, Event)
 
@@ -40,8 +41,12 @@ def ensure_pullable(db: Session, pullable_id: int) -> Pullable:
     return pullable
 
 
-def create_pullable(db: Session, rarity: float, user_id: int) -> Pullable:
-    timestamp = utcnow()
+def create_pullable(
+    db: Session,
+    rarity: float,
+    user_id: int,
+    timestamp: datetime,
+) -> Pullable:
     pullable = Pullable(
         rarity=rarity,
         created_at=timestamp,
@@ -58,8 +63,8 @@ def update_rarity(item: Any, rarity: float) -> None:
     item.pullable.rarity = rarity
 
 
-def touch_pullable(pullable: Pullable, user_id: int) -> None:
-    pullable.updated_at = utcnow()
+def touch_pullable(pullable: Pullable, user_id: int, timestamp: datetime) -> None:
+    pullable.updated_at = timestamp
     pullable.updated_by = user_id
 
 
@@ -79,14 +84,23 @@ def delete_pullable(db: Session, entity_id: int) -> StagedMediaDeletion:
     return staged_deletion
 
 
-def audit(db: Session, actor: UserAccount, entity_type: str, entity_id: int, action: str, payload: Any = None) -> None:
+def log_activity(
+    db: Session,
+    actor: UserAccount,
+    entity_type: EntityType,
+    entity_id: int,
+    action: ActivityAction,
+    occurred_at: datetime,
+    payload: Any = None,
+) -> None:
     db.add(
-        AuditLog(
+        ActivityLog(
             actor_user_id=actor.id,
-            entity_type=entity_type,
+            entity_type=entity_type.value,
             entity_id=entity_id,
-            action=action,
+            action=action.value,
             payload_json=json.dumps(payload, default=str, ensure_ascii=False) if payload is not None else None,
+            occurred_at=occurred_at,
         )
     )
 
@@ -97,3 +111,13 @@ def entity_title(item: Any, entity_type: EntityType) -> str:
     if entity_type in {EntityType.PLACE, EntityType.EPOCH}:
         return item.name
     return item.title
+
+
+def pullable_entity_type(db: Session, pullable_id: int) -> EntityType:
+    for entity_type, model in MODEL_BY_ENTITY.items():
+        if db.get(model, pullable_id) is not None:
+            return entity_type
+    raise HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        detail="Elemento collegato non valido",
+    )

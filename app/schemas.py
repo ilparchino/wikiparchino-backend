@@ -6,6 +6,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.models import Connotation, EntityType, Sex
+from app.security import MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH
 
 
 class UserOut(BaseModel):
@@ -27,6 +28,27 @@ class LoginOut(BaseModel):
     token_type: Literal["bearer"] = "bearer"
     expires_at: datetime
     user: UserOut
+
+
+class PasswordChangeIn(BaseModel):
+    current_password: str = Field(min_length=1, max_length=MAX_PASSWORD_LENGTH)
+    new_password: str = Field(
+        min_length=MIN_PASSWORD_LENGTH,
+        max_length=MAX_PASSWORD_LENGTH,
+    )
+
+
+class ProfileActivityOut(BaseModel):
+    entity_type: EntityType
+    entity_id: int
+    title: str
+    action: Literal["created", "updated"]
+    occurred_at: datetime
+
+
+class ProfileOut(BaseModel):
+    user: UserOut
+    recent_activity: list[ProfileActivityOut]
 
 
 class RarityMixin(BaseModel):

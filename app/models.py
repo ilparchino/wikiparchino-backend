@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from enum import StrEnum
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, CheckConstraint, DateTime, Float, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -32,6 +32,16 @@ class EntityType(StrEnum):
     PLACE = "place"
     EVENT = "event"
     EPOCH = "epoch"
+
+
+class ActivityAction(StrEnum):
+    CREATE = "create"
+    UPDATE = "update"
+    DELETE = "delete"
+    REPLACE_PARTICIPANTS = "replace_participants"
+    REPLACE_PLACES = "replace_places"
+    UPLOAD_MEDIA = "upload_media"
+    DELETE_MEDIA = "delete_media"
 
 
 class TimestampMixin:
@@ -75,7 +85,10 @@ class UserSession(Base):
 
 class Pullable(Base, AttributionMixin):
     __tablename__ = "pullable"
-    __table_args__ = (CheckConstraint("rarity > 0", name="ck_pullable_rarity_positive"),)
+    __table_args__ = (
+        CheckConstraint("rarity > 0", name="ck_pullable_rarity_positive"),
+        {"sqlite_autoincrement": True},
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     rarity: Mapped[float] = mapped_column(Float, default=1.0, nullable=False)
@@ -212,6 +225,7 @@ class PersonEvent(Base, AttributionMixin):
 
 class MediaAsset(Base):
     __tablename__ = "media_asset"
+    __table_args__ = {"sqlite_autoincrement": True}
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     pullable_id: Mapped[int] = mapped_column(ForeignKey("pullable.id", ondelete="CASCADE", onupdate="CASCADE"), nullable=False)
@@ -226,8 +240,21 @@ class MediaAsset(Base):
     pullable: Mapped[Pullable] = relationship()
 
 
-class AuditLog(Base):
-    __tablename__ = "audit_log"
+class ActivityLog(Base):
+    __tablename__ = "activity_log"
+    __table_args__ = (
+        CheckConstraint(
+            "entity_type in ('person', 'place', 'epoch', 'event')",
+            name="ck_activity_log_entity_type",
+        ),
+        CheckConstraint(
+            "action in ('create', 'update', 'delete', 'replace_participants', "
+            "'replace_places', 'upload_media', 'delete_media')",
+            name="ck_activity_log_action",
+        ),
+        Index("ix_activity_log_actor_occurred_at", "actor_user_id", "occurred_at"),
+        {"sqlite_autoincrement": True},
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     actor_user_id: Mapped[int | None] = mapped_column(
@@ -237,4 +264,4 @@ class AuditLog(Base):
     entity_id: Mapped[int] = mapped_column(Integer, nullable=False)
     action: Mapped[str] = mapped_column(String(40), nullable=False)
     payload_json: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

@@ -4,9 +4,9 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session, joinedload
 
 from app.api.deps import current_user
-from app.api.utils import active_or_404, audit, touch_pullable
+from app.api.utils import active_or_404, log_activity, touch_pullable
 from app.database import get_db
-from app.models import EntityType, Epoch, Event, Person, PersonEvent, PersonPlace, Place, UserAccount
+from app.models import ActivityAction, EntityType, Epoch, Event, Person, PersonEvent, PersonPlace, Place, UserAccount, utcnow
 from app.schemas import (
     EventOut,
     EventParticipantIn,
@@ -45,6 +45,7 @@ def replace_event_participants(
     event = active_or_404(db, Event, event_id)
     for entry in payload:
         active_or_404(db, Person, entry.person_id)
+    timestamp = utcnow()
     db.query(PersonEvent).filter(PersonEvent.event_id == event_id).delete()
     for entry in payload:
         db.add(
@@ -53,12 +54,22 @@ def replace_event_participants(
                 person_id=entry.person_id,
                 role=entry.role,
                 motivation=entry.motivation,
+                created_at=timestamp,
+                updated_at=timestamp,
                 created_by=user.id,
                 updated_by=user.id,
             )
         )
-    touch_pullable(event.pullable, user.id)
-    audit(db, user, EntityType.EVENT.value, event_id, "replace_participants", [item.model_dump() for item in payload])
+    touch_pullable(event.pullable, user.id, timestamp)
+    log_activity(
+        db,
+        user,
+        EntityType.EVENT,
+        event_id,
+        ActivityAction.REPLACE_PARTICIPANTS,
+        timestamp,
+        [item.model_dump() for item in payload],
+    )
     db.commit()
     return list_event_participants(event_id, user, db)
 
@@ -105,6 +116,7 @@ def replace_person_places(
     person = active_or_404(db, Person, person_id)
     for entry in payload:
         active_or_404(db, Place, entry.place_id)
+    timestamp = utcnow()
     db.query(PersonPlace).filter(PersonPlace.person_id == person_id).delete()
     for entry in payload:
         db.add(
@@ -112,12 +124,22 @@ def replace_person_places(
                 person_id=person_id,
                 place_id=entry.place_id,
                 motivation=entry.motivation,
+                created_at=timestamp,
+                updated_at=timestamp,
                 created_by=user.id,
                 updated_by=user.id,
             )
         )
-    touch_pullable(person.pullable, user.id)
-    audit(db, user, EntityType.PERSON.value, person_id, "replace_places", [item.model_dump() for item in payload])
+    touch_pullable(person.pullable, user.id, timestamp)
+    log_activity(
+        db,
+        user,
+        EntityType.PERSON,
+        person_id,
+        ActivityAction.REPLACE_PLACES,
+        timestamp,
+        [item.model_dump() for item in payload],
+    )
     db.commit()
     return list_person_places(person_id, user, db)
 

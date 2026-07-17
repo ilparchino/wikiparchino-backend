@@ -9,6 +9,8 @@ import secrets
 
 
 PBKDF2_ITERATIONS = 390_000
+MIN_PASSWORD_LENGTH = 12
+MAX_PASSWORD_LENGTH = 200
 
 
 def hash_password(password: str, *, salt: bytes | None = None) -> str:
@@ -48,4 +50,3 @@ def utcnow() -> datetime:
 
 def expires_in_days(days: int) -> datetime:
     return utcnow() + timedelta(days=days)
-

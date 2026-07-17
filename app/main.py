@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi import Depends
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import auth, entities, media, pulls, relationships, search
+from app.api import auth, entities, media, profile, pulls, relationships, search
 from app.api.deps import current_user
 from app.config import get_settings
 from app.models import UserAccount
@@ -26,6 +26,7 @@ def create_app() -> FastAPI:
     app.include_router(entities.router, prefix="/api")
     app.include_router(relationships.router, prefix="/api")
     app.include_router(media.router, prefix="/api")
+    app.include_router(profile.router, prefix="/api")
     app.include_router(search.router, prefix="/api")
     app.include_router(pulls.router, prefix="/api")
 

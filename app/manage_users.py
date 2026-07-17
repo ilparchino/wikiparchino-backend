@@ -7,10 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.database import SessionLocal
 from app.models import UserAccount
-from app.security import hash_password
-
-MIN_PASSWORD_LENGTH = 12
-MAX_PASSWORD_LENGTH = 200
+from app.security import MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH, hash_password
 
 
 def required_text(prompt: str, maximum: int, input_fn: Callable[[str], str]) -> str:

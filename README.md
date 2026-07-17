@@ -5,13 +5,14 @@ The backend service for Wiki Parchino. It provides authentication, structured st
 ## Features
 
 - Fixed user accounts with password hashing and opaque Bearer sessions.
+- Self-service password changes that preserve the current session and revoke other sessions.
 - CRUD APIs for people, places, epochs, and events.
 - Shared pullable identifiers and configurable rarity weights.
 - Person-event and person-place relationships.
-- Authenticated image upload and download.
+- Authenticated image upload, download, deletion, and batched list previews.
 - Cross-entity search, random pulls, and deterministic daily pulls.
 - Hard deletion with database cascades and protected place/epoch references.
-- Audit records identifying users who create, update, or delete content.
+- Constrained activity history identifying users who create, update, delete, or relink content.
 
 ## Technology
 
@@ -147,11 +148,12 @@ Relative paths are resolved from the current working directory when supplied thr
 All application endpoints are under `/api`:
 
 - `/auth/login`, `/auth/logout`, and `/me`
+- `/profile` and `/profile/password`
 - `/people`, `/places`, `/epochs`, and `/events`
 - relationship endpoints nested under people, places, epochs, and events
 - `/search`
 - `/pulls/random` and `/pulls/daily`
-- `/media`
+- `/media`, `/media/previews`, and `/media/{id}`
 
 Except for health and login, application endpoints require `Authorization: Bearer <token>`. Login returns the opaque token once; the server stores only its hash. The OpenAPI UI is the authoritative interactive endpoint reference.
 
@@ -163,7 +165,7 @@ Run the complete backend suite:
 make test
 ```
 
-The suite covers authentication and session reuse, authorization, CRUD, database constraints, hard-delete behavior, relationships, media, search, pulls, and fresh Alembic migrations.
+The suite covers authentication and session reuse, profile activity, password changes, authorization, CRUD, database constraints, hard-delete behavior, relationships, media previews and storage, search, pulls, and fresh Alembic migrations.
 
 ## Deployment Notes
 
