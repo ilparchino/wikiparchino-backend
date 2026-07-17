@@ -183,8 +183,15 @@ def test_delete_cascades_media_and_relationship_rows(auth_client: httpx.Client, 
         )
     assert uploaded.status_code == 201
     media_id = uploaded.json()["id"]
+    from app.database import SessionLocal
+    from app.models import MediaAsset
+
+    with SessionLocal() as db:
+        stored_path = Path(db.get(MediaAsset, media_id).disk_path)
+    assert stored_path.exists()
 
     assert auth_client.delete(f"/api/people/{person['id']}").status_code == 204
+    assert not stored_path.exists()
     assert auth_client.get(f"/api/media/{media_id}").status_code == 404
     reverse_links = auth_client.get(f"/api/places/{place['id']}/people")
     assert reverse_links.status_code == 200
@@ -333,3 +340,53 @@ def test_media_upload_and_list(auth_client: httpx.Client, tmp_path: Path) -> Non
     assert listed.status_code == 200
     assert any(item["id"] == media_id for item in listed.json())
     assert auth_client.get(f"/api/media/{media_id}").status_code == 200
+    event_before_delete = auth_client.get(f"/api/events/{event['id']}").json()
+
+    from app.database import SessionLocal
+    from app.models import MediaAsset
+
+    with SessionLocal() as db:
+        stored_path = Path(db.get(MediaAsset, media_id).disk_path)
+    assert stored_path.exists()
+
+    deleted = auth_client.delete(f"/api/media/{media_id}")
+    assert deleted.status_code == 204
+    assert not stored_path.exists()
+    event_after_delete = auth_client.get(f"/api/events/{event['id']}").json()
+    assert parse_timestamp(event_after_delete["updated_at"]) > parse_timestamp(
+        event_before_delete["updated_at"]
+    )
+    with SessionLocal() as db:
+        assert db.get(MediaAsset, media_id) is None
+    assert auth_client.delete(f"/api/media/{media_id}").status_code == 404
+
+
+def test_media_delete_reconciles_missing_files_and_requires_authentication(
+    auth_client: httpx.Client, client: httpx.Client, tmp_path: Path
+) -> None:
+    event = auth_client.get("/api/events").json()[0]
+    image = tmp_path / "stale.png"
+    image.write_bytes(b"\x89PNG\r\n\x1a\n")
+    with image.open("rb") as handle:
+        uploaded = auth_client.post(
+            "/api/media",
+            data={"pullable_id": str(event["id"])},
+            files={"file": ("stale.png", handle, "image/png")},
+        )
+    assert uploaded.status_code == 201
+    media_id = uploaded.json()["id"]
+
+    from app.database import SessionLocal
+    from app.models import MediaAsset
+
+    with SessionLocal() as db:
+        stored_path = Path(db.get(MediaAsset, media_id).disk_path)
+    stored_path.unlink()
+
+    auth_client.headers.pop("Authorization")
+    assert client.delete(f"/api/media/{media_id}").status_code == 401
+    login = client.post("/api/auth/login", json={"username": "admin", "password": "admin"})
+    client.headers["Authorization"] = f"Bearer {login.json()['access_token']}"
+    assert client.delete(f"/api/media/{media_id}").status_code == 204
+    with SessionLocal() as db:
+        assert db.get(MediaAsset, media_id) is None

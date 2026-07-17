@@ -20,7 +20,7 @@ def bearer_token(
     if credentials is None or credentials.scheme.lower() != "bearer" or not credentials.credentials:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Not authenticated",
+            detail="Autenticazione richiesta",
             headers=AUTHENTICATE_HEADER,
         )
     return credentials.credentials
@@ -35,7 +35,7 @@ def current_session(
     if not session:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid session",
+            detail="Sessione non valida",
             headers=AUTHENTICATE_HEADER,
         )
     expires_at = session.expires_at
@@ -46,13 +46,13 @@ def current_session(
         db.commit()
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Session expired",
+            detail="Sessione scaduta",
             headers=AUTHENTICATE_HEADER,
         )
     if not session.user.is_active:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Inactive account",
+            detail="Account non attivo",
             headers=AUTHENTICATE_HEADER,
         )
     return session

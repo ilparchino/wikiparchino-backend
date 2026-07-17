@@ -73,7 +73,7 @@ def active_pullables(db: Session, entity_type: EntityType | None = None) -> list
 
 def weighted_pick(candidates: list[PullCandidate], rng: random.Random) -> PullCandidate:
     if not candidates:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No pullable items")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Nessun elemento disponibile per l'estrazione")
     total = sum(candidate.rarity for candidate in candidates)
     threshold = rng.uniform(0, total)
     cursor = 0.0

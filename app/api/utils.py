@@ -6,7 +6,8 @@ from typing import Any, TypeVar
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.models import AuditLog, EntityType, Epoch, Event, Person, Place, Pullable, UserAccount, utcnow
+from app.media_storage import MediaStorageError, StagedMediaDeletion, stage_media_deletion
+from app.models import AuditLog, EntityType, Epoch, Event, MediaAsset, Person, Place, Pullable, UserAccount, utcnow
 
 ModelT = TypeVar("ModelT", Person, Place, Epoch, Event)
 
@@ -21,21 +22,21 @@ MODEL_BY_ENTITY: dict[EntityType, type[Any]] = {
 def active_or_404(db: Session, model: type[ModelT], entity_id: int) -> ModelT:
     item = db.get(model, entity_id)
     if item is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Elemento non trovato")
     return item
 
 
 def ensure_reference(db: Session, model: type[ModelT], entity_id: int, label: str) -> ModelT:
     item = db.get(model, entity_id)
     if item is None:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Unknown {label}")
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Riferimento {label} non valido")
     return item
 
 
 def ensure_pullable(db: Session, pullable_id: int) -> Pullable:
     pullable = db.get(Pullable, pullable_id)
     if pullable is None:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unknown pullable")
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Elemento collegato non valido")
     return pullable
 
 
@@ -62,11 +63,20 @@ def touch_pullable(pullable: Pullable, user_id: int) -> None:
     pullable.updated_by = user_id
 
 
-def delete_pullable(db: Session, entity_id: int) -> None:
+def delete_pullable(db: Session, entity_id: int) -> StagedMediaDeletion:
     pullable = db.get(Pullable, entity_id)
     if pullable is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Elemento non trovato")
+    assets = db.query(MediaAsset).filter(MediaAsset.pullable_id == entity_id).all()
+    try:
+        staged_deletion = stage_media_deletion(assets)
+    except MediaStorageError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Non è stato possibile preparare la rimozione delle immagini",
+        ) from exc
     db.delete(pullable)
+    return staged_deletion
 
 
 def audit(db: Session, actor: UserAccount, entity_type: str, entity_id: int, action: str, payload: Any = None) -> None:

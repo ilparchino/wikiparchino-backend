@@ -30,7 +30,7 @@ def check_rate_limit(request: Request, username: str) -> None:
     cutoff = utcnow() - LOGIN_WINDOW
     login_attempts[key] = [attempt for attempt in login_attempts[key] if attempt > cutoff]
     if len(login_attempts[key]) >= MAX_LOGIN_ATTEMPTS:
-        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Too many login attempts")
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Troppi tentativi di accesso")
 
 
 def record_failed_attempt(request: Request, username: str) -> None:
@@ -43,7 +43,7 @@ def login(payload: LoginIn, request: Request, response: Response, db: Session = 
     user = db.query(UserAccount).filter(UserAccount.username == payload.username.lower()).first()
     if user is None or not user.is_active or not verify_password(payload.password, user.password_hash):
         record_failed_attempt(request, payload.username)
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Credenziali non valide")
 
     login_attempts.pop(rate_limit_key(request, payload.username), None)
     now = utcnow()

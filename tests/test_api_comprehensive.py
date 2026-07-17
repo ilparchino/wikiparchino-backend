@@ -99,7 +99,7 @@ def test_bearer_validation_expiry_and_inactive_accounts(client: httpx.Client) ->
 
     expired = client.get("/api/me", headers={"Authorization": f"Bearer {token}"})
     assert_status(expired, 401)
-    assert expired.json()["detail"] == "Session expired"
+    assert expired.json()["detail"] == "Sessione scaduta"
 
     active_login = client.post(
         "/api/auth/login", json={"username": "admin", "password": "admin"}
@@ -114,7 +114,7 @@ def test_bearer_validation_expiry_and_inactive_accounts(client: httpx.Client) ->
         headers={"Authorization": f"Bearer {active_login['access_token']}"},
     )
     assert_status(inactive, 401)
-    assert inactive.json()["detail"] == "Inactive account"
+    assert inactive.json()["detail"] == "Account non attivo"
 
 
 def test_logout_revokes_only_the_presented_session(client: httpx.Client) -> None:

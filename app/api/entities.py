@@ -14,6 +14,7 @@ from app.api.utils import (
     update_rarity,
 )
 from app.database import get_db
+from app.media_storage import commit_staged_deletion
 from app.models import EntityType, Epoch, Event, Person, Place, UserAccount
 from app.schemas import (
     EpochCreate,
@@ -81,8 +82,8 @@ def update_person(
 def delete_person(person_id: int, user: UserAccount = Depends(current_user), db: Session = Depends(get_db)) -> None:
     active_or_404(db, Person, person_id)
     audit(db, user, EntityType.PERSON.value, person_id, "delete")
-    delete_pullable(db, person_id)
-    db.commit()
+    staged_deletion = delete_pullable(db, person_id)
+    commit_staged_deletion(db, staged_deletion)
 
 
 @router.get("/places", response_model=list[PlaceOut])
@@ -129,8 +130,8 @@ def delete_place(place_id: int, user: UserAccount = Depends(current_user), db: S
     if db.query(Event).filter(Event.place_id == place_id).first() is not None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Il luogo è usato da uno o più eventi")
     audit(db, user, EntityType.PLACE.value, place_id, "delete")
-    delete_pullable(db, place_id)
-    db.commit()
+    staged_deletion = delete_pullable(db, place_id)
+    commit_staged_deletion(db, staged_deletion)
 
 
 @router.get("/epochs", response_model=list[EpochOut])
@@ -177,8 +178,8 @@ def delete_epoch(epoch_id: int, user: UserAccount = Depends(current_user), db: S
     if db.query(Event).filter(Event.epoch_id == epoch_id).first() is not None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="L'epoca è usata da uno o più eventi")
     audit(db, user, EntityType.EPOCH.value, epoch_id, "delete")
-    delete_pullable(db, epoch_id)
-    db.commit()
+    staged_deletion = delete_pullable(db, epoch_id)
+    commit_staged_deletion(db, staged_deletion)
 
 
 @router.get("/events", response_model=list[EventOut])
@@ -193,8 +194,8 @@ def list_events(user: UserAccount = Depends(current_user), db: Session = Depends
 
 @router.post("/events", response_model=EventOut, status_code=status.HTTP_201_CREATED)
 def create_event(payload: EventCreate, user: UserAccount = Depends(current_user), db: Session = Depends(get_db)) -> Event:
-    ensure_reference(db, Place, payload.place_id, "place")
-    ensure_reference(db, Epoch, payload.epoch_id, "epoch")
+    ensure_reference(db, Place, payload.place_id, "luogo")
+    ensure_reference(db, Epoch, payload.epoch_id, "epoca")
     data, rarity = split_rarity(payload)
     pullable = create_pullable(db, rarity, user.id)
     item = Event(id=pullable.id, **data)
@@ -214,8 +215,8 @@ def get_event(event_id: int, user: UserAccount = Depends(current_user), db: Sess
 def update_event(
     event_id: int, payload: EventUpdate, user: UserAccount = Depends(current_user), db: Session = Depends(get_db)
 ) -> Event:
-    ensure_reference(db, Place, payload.place_id, "place")
-    ensure_reference(db, Epoch, payload.epoch_id, "epoch")
+    ensure_reference(db, Place, payload.place_id, "luogo")
+    ensure_reference(db, Epoch, payload.epoch_id, "epoca")
     item = active_or_404(db, Event, event_id)
     data, rarity = split_rarity(payload)
     for key, value in data.items():
@@ -232,5 +233,5 @@ def update_event(
 def delete_event(event_id: int, user: UserAccount = Depends(current_user), db: Session = Depends(get_db)) -> None:
     active_or_404(db, Event, event_id)
     audit(db, user, EntityType.EVENT.value, event_id, "delete")
-    delete_pullable(db, event_id)
-    db.commit()
+    staged_deletion = delete_pullable(db, event_id)
+    commit_staged_deletion(db, staged_deletion)
