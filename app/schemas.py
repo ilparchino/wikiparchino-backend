@@ -18,6 +18,101 @@ class UserOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class AdminUserOut(UserOut):
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+    active_session_count: int = 0
+
+
+class AdminUserCreate(BaseModel):
+    username: str = Field(min_length=1, max_length=80)
+    display_name: str = Field(min_length=1, max_length=160)
+    password: str = Field(min_length=MIN_PASSWORD_LENGTH, max_length=MAX_PASSWORD_LENGTH)
+    is_admin: bool = False
+
+    @field_validator("username")
+    @classmethod
+    def normalize_username(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if not normalized:
+            raise ValueError("Lo username non può essere vuoto")
+        return normalized
+
+    @field_validator("display_name")
+    @classmethod
+    def normalize_display_name(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("Il nome visualizzato non può essere vuoto")
+        return normalized
+
+
+class AdminUserUpdate(BaseModel):
+    display_name: str = Field(min_length=1, max_length=160)
+    is_admin: bool
+    is_active: bool
+
+    @field_validator("display_name")
+    @classmethod
+    def normalize_display_name(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("Il nome visualizzato non può essere vuoto")
+        return normalized
+
+
+class AdminPasswordResetIn(BaseModel):
+    new_password: str = Field(
+        min_length=MIN_PASSWORD_LENGTH,
+        max_length=MAX_PASSWORD_LENGTH,
+    )
+
+
+class AdminActivityOut(BaseModel):
+    source: Literal["content", "account", "authentication"]
+    action: str
+    occurred_at: datetime
+    actor: UserOut | None = None
+    target: UserOut | None = None
+    entity_type: EntityType | None = None
+    entity_id: int | None = None
+    title: str | None = None
+    linkable: bool = False
+    source_ip: str | None = None
+
+
+class AdminActivityPage(BaseModel):
+    items: list[AdminActivityOut]
+    total: int
+    page: int
+    page_size: int
+
+
+class AdminUserDetailOut(BaseModel):
+    user: AdminUserOut
+    content_activity: list[AdminActivityOut]
+    account_activity: list[AdminActivityOut]
+
+
+class AdminSummaryOut(BaseModel):
+    total_users: int
+    active_users: int
+    inactive_users: int
+    admin_users: int
+    active_sessions: int
+    people: int
+    places: int
+    epochs: int
+    events: int
+    media: int
+    activity_last_24h: int
+
+
+class SessionRevocationOut(BaseModel):
+    revoked_count: int
+
+
 class LoginIn(BaseModel):
     username: str = Field(min_length=1, max_length=80)
     password: str = Field(min_length=1, max_length=200)

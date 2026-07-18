@@ -1,14 +1,15 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import current_session, current_user
 from app.api.utils import MODEL_BY_ENTITY, entity_title
 from app.database import get_db
-from app.models import ActivityLog, EntityType, UserAccount, UserSession
+from app.models import ActivityLog, EntityType, SecurityEventType, UserAccount, UserSession
 from app.schemas import PasswordChangeIn, ProfileActivityOut, ProfileOut, UserOut
 from app.security import hash_password, utcnow, verify_password
+from app.security_events import log_security_event, request_ip
 
 router = APIRouter(prefix="/profile", tags=["profile"])
 RECENT_ACTIVITY_LIMIT = 10
@@ -61,6 +62,7 @@ def get_profile(
 )
 def change_password(
     payload: PasswordChangeIn,
+    request: Request,
     session: UserSession = Depends(current_session),
     db: Session = Depends(get_db),
 ) -> Response:
@@ -76,12 +78,21 @@ def change_password(
             detail="La nuova password deve essere diversa da quella attuale",
         )
 
+    timestamp = utcnow()
     user.password_hash = hash_password(payload.new_password)
-    user.updated_at = utcnow()
+    user.updated_at = timestamp
     (
         db.query(UserSession)
         .filter(UserSession.user_id == user.id, UserSession.id != session.id)
         .delete(synchronize_session=False)
+    )
+    log_security_event(
+        db,
+        SecurityEventType.PASSWORD_CHANGED,
+        timestamp,
+        actor=user,
+        target=user,
+        source_ip=request_ip(request),
     )
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)

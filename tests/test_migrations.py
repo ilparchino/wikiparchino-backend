@@ -78,6 +78,7 @@ def test_activity_migration_preserves_data_and_hardens_ids(
             ).scalars()
         )
         assert "activity_log" in tables
+        assert "security_event_log" in tables
         assert "audit_log" not in tables
 
         activity_columns = {
@@ -103,6 +104,7 @@ def test_activity_migration_preserves_data_and_hardens_ids(
             ).mappings()
         }
         assert "ix_activity_log_actor_occurred_at" in indexes
+        assert "ix_activity_log_occurred_at" in indexes
         table_sql = {
             row["name"]: row["sql"]
             for row in connection.execute(
@@ -202,6 +204,7 @@ def test_activity_migration_preserves_data_and_hardens_ids(
         )
         assert "audit_log" in tables
         assert "activity_log" not in tables
+        assert "security_event_log" not in tables
         restored = connection.execute(
             text("select * from audit_log where id = 88")
         ).mappings().one()

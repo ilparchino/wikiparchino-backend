@@ -82,8 +82,8 @@ def update_person(
 
 @router.delete("/people/{person_id}", status_code=status.HTTP_204_NO_CONTENT, response_class=Response, response_model=None)
 def delete_person(person_id: int, user: UserAccount = Depends(current_user), db: Session = Depends(get_db)) -> None:
-    active_or_404(db, Person, person_id)
-    log_activity(db, user, EntityType.PERSON, person_id, ActivityAction.DELETE, utcnow())
+    item = active_or_404(db, Person, person_id)
+    log_activity(db, user, EntityType.PERSON, person_id, ActivityAction.DELETE, utcnow(), {"title": item.alias})
     staged_deletion = delete_pullable(db, person_id)
     commit_staged_deletion(db, staged_deletion)
 
@@ -130,10 +130,10 @@ def update_place(
 
 @router.delete("/places/{place_id}", status_code=status.HTTP_204_NO_CONTENT, response_class=Response, response_model=None)
 def delete_place(place_id: int, user: UserAccount = Depends(current_user), db: Session = Depends(get_db)) -> None:
-    active_or_404(db, Place, place_id)
+    item = active_or_404(db, Place, place_id)
     if db.query(Event).filter(Event.place_id == place_id).first() is not None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Il luogo è usato da uno o più eventi")
-    log_activity(db, user, EntityType.PLACE, place_id, ActivityAction.DELETE, utcnow())
+    log_activity(db, user, EntityType.PLACE, place_id, ActivityAction.DELETE, utcnow(), {"title": item.name})
     staged_deletion = delete_pullable(db, place_id)
     commit_staged_deletion(db, staged_deletion)
 
@@ -180,10 +180,10 @@ def update_epoch(
 
 @router.delete("/epochs/{epoch_id}", status_code=status.HTTP_204_NO_CONTENT, response_class=Response, response_model=None)
 def delete_epoch(epoch_id: int, user: UserAccount = Depends(current_user), db: Session = Depends(get_db)) -> None:
-    active_or_404(db, Epoch, epoch_id)
+    item = active_or_404(db, Epoch, epoch_id)
     if db.query(Event).filter(Event.epoch_id == epoch_id).first() is not None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="L'epoca è usata da uno o più eventi")
-    log_activity(db, user, EntityType.EPOCH, epoch_id, ActivityAction.DELETE, utcnow())
+    log_activity(db, user, EntityType.EPOCH, epoch_id, ActivityAction.DELETE, utcnow(), {"title": item.name})
     staged_deletion = delete_pullable(db, epoch_id)
     commit_staged_deletion(db, staged_deletion)
 
@@ -239,7 +239,7 @@ def update_event(
 
 @router.delete("/events/{event_id}", status_code=status.HTTP_204_NO_CONTENT, response_class=Response, response_model=None)
 def delete_event(event_id: int, user: UserAccount = Depends(current_user), db: Session = Depends(get_db)) -> None:
-    active_or_404(db, Event, event_id)
-    log_activity(db, user, EntityType.EVENT, event_id, ActivityAction.DELETE, utcnow())
+    item = active_or_404(db, Event, event_id)
+    log_activity(db, user, EntityType.EVENT, event_id, ActivityAction.DELETE, utcnow(), {"title": item.title})
     staged_deletion = delete_pullable(db, event_id)
     commit_staged_deletion(db, staged_deletion)

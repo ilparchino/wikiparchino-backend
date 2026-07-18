@@ -6,6 +6,8 @@ The backend service for Wiki Parchino. It provides authentication, structured st
 
 - Fixed user accounts with password hashing and opaque Bearer sessions.
 - Self-service password changes that preserve the current session and revoke other sessions.
+- Administrator-only account management with user creation, reversible deactivation, role changes, password resets, and session revocation.
+- Paginated content, account, and authentication activity with 90-day retention for authentication events.
 - CRUD APIs for people, places, epochs, and events.
 - Shared pullable identifiers and configurable rarity weights.
 - Person-event and person-place relationships.
@@ -36,6 +38,7 @@ The backend service for Wiki Parchino. It provides authentication, structured st
 |   |-- models.py        Database models
 |   |-- schemas.py       Request and response schemas
 |   |-- security.py      Password and session helpers
+|   |-- security_events.py Security-event recording and retention
 |   `-- seed.py          Local demo data
 |-- assets/              Static assets required by the seed process
 |-- tests/               API, behavior, and migration tests
@@ -149,13 +152,16 @@ All application endpoints are under `/api`:
 
 - `/auth/login`, `/auth/logout`, and `/me`
 - `/profile` and `/profile/password`
+- `/admin/summary`, `/admin/users`, and `/admin/activity` (administrators only)
 - `/people`, `/places`, `/epochs`, and `/events`
 - relationship endpoints nested under people, places, epochs, and events
 - `/search`
 - `/pulls/random` and `/pulls/daily`
 - `/media`, `/media/previews`, and `/media/{id}`
 
-Except for health and login, application endpoints require `Authorization: Bearer <token>`. Login returns the opaque token once; the server stores only its hash. The OpenAPI UI is the authoritative interactive endpoint reference.
+Except for health and login, application endpoints require `Authorization: Bearer <token>`. Login returns the opaque token once; the server stores only its hash. Routes below `/api/admin` additionally require an active account with `is_admin = true`; this is enforced by the backend and does not depend on frontend visibility.
+
+Administrators deactivate accounts instead of deleting them. Deactivation immediately revokes all sessions while preserving attribution and activity history; reactivation permits a future login but does not create a session. Content actions remain in `activity_log`. Account and access actions are stored separately in `security_event_log`; authentication events are pruned after 90 days and credential material is never logged. The OpenAPI UI is the authoritative interactive endpoint reference.
 
 ## Testing
 
@@ -165,7 +171,7 @@ Run the complete backend suite:
 make test
 ```
 
-The suite covers authentication and session reuse, profile activity, password changes, authorization, CRUD, database constraints, hard-delete behavior, relationships, media previews and storage, search, pulls, and fresh Alembic migrations.
+The suite covers authentication and session reuse, administrator authorization and account safeguards, account deactivation, activity/security history, profile activity, password changes, CRUD, database constraints, hard-delete behavior, relationships, media previews and storage, search, pulls, and fresh Alembic migrations.
 
 ## Deployment Notes
 

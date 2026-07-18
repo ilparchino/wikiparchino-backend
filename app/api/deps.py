@@ -62,3 +62,12 @@ def current_user(
     session: UserSession = Depends(current_session),
 ) -> UserAccount:
     return session.user
+
+
+def current_admin(user: UserAccount = Depends(current_user)) -> UserAccount:
+    if not user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Accesso riservato agli amministratori",
+        )
+    return user

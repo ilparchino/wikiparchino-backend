@@ -44,6 +44,21 @@ class ActivityAction(StrEnum):
     DELETE_MEDIA = "delete_media"
 
 
+class SecurityEventType(StrEnum):
+    USER_CREATED = "user_created"
+    DISPLAY_NAME_CHANGED = "display_name_changed"
+    ROLE_CHANGED = "role_changed"
+    USER_ACTIVATED = "user_activated"
+    USER_DEACTIVATED = "user_deactivated"
+    PASSWORD_CHANGED = "password_changed"
+    PASSWORD_RESET = "password_reset"
+    SESSIONS_REVOKED = "sessions_revoked"
+    LOGIN_SUCCEEDED = "login_succeeded"
+    LOGIN_FAILED = "login_failed"
+    LOGIN_RATE_LIMITED = "login_rate_limited"
+    LOGOUT = "logout"
+
+
 class TimestampMixin:
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
@@ -253,6 +268,7 @@ class ActivityLog(Base):
             name="ck_activity_log_action",
         ),
         Index("ix_activity_log_actor_occurred_at", "actor_user_id", "occurred_at"),
+        Index("ix_activity_log_occurred_at", "occurred_at"),
         {"sqlite_autoincrement": True},
     )
 
@@ -263,5 +279,42 @@ class ActivityLog(Base):
     entity_type: Mapped[str] = mapped_column(String(40), nullable=False)
     entity_id: Mapped[int] = mapped_column(Integer, nullable=False)
     action: Mapped[str] = mapped_column(String(40), nullable=False)
+    payload_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class SecurityEventLog(Base):
+    __tablename__ = "security_event_log"
+    __table_args__ = (
+        CheckConstraint(
+            "event_type in ('user_created', 'display_name_changed', 'role_changed', "
+            "'user_activated', 'user_deactivated', 'password_changed', "
+            "'password_reset', 'sessions_revoked', 'login_succeeded', "
+            "'login_failed', 'login_rate_limited', 'logout')",
+            name="ck_security_event_log_type",
+        ),
+        Index("ix_security_event_log_occurred_at", "occurred_at"),
+        Index("ix_security_event_log_actor_occurred_at", "actor_user_id", "occurred_at"),
+        Index("ix_security_event_log_target_occurred_at", "target_user_id", "occurred_at"),
+        Index(
+            "ix_security_event_log_rate_limit",
+            "event_type",
+            "source_ip",
+            "attempted_username",
+            "occurred_at",
+        ),
+        {"sqlite_autoincrement": True},
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    event_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    actor_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("user_account.id", ondelete="SET NULL", onupdate="CASCADE"), nullable=True
+    )
+    target_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("user_account.id", ondelete="SET NULL", onupdate="CASCADE"), nullable=True
+    )
+    attempted_username: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    source_ip: Mapped[str | None] = mapped_column(String(45), nullable=True)
     payload_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
