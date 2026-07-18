@@ -39,8 +39,7 @@ The backend service for Wiki Parchino. It provides authentication, structured st
 |   |-- schemas.py       Request and response schemas
 |   |-- security.py      Password and session helpers
 |   |-- security_events.py Security-event recording and retention
-|   `-- seed.py          Local demo data
-|-- assets/              Static assets required by the seed process
+|   `-- seed.py          Anonymized local demo and minimal test data
 |-- tests/               API, behavior, and migration tests
 |-- alembic.ini
 |-- Makefile             Short environment-aware development commands
@@ -77,9 +76,20 @@ Requirements are Python 3.11 or newer and GNU Make.
    make migrate
    ```
 
-5. Optionally load the local demo account and sample content:
+5. Optionally load the anonymized local demo accounts and sample content into an empty database:
 
    ```bash
+   make seed
+   ```
+
+   The demo contains 8 generic accounts, 24 people, 12 places, 5 epochs, 40 events, relationships, activity history, and generated sample images. The usernames are `admin`, `admin2`, and `utente1` through `utente6`; they all use the development-only password `demo-password-123`. The final account is inactive, while `admin` and `admin2` are administrators.
+
+   The seed intentionally refuses to mix demo records with an existing database or non-empty media directory. To rebuild the disposable local demo, stop the server and run:
+
+   ```bash
+   rm -f wiki_parchino.db
+   rm -rf media
+   make migrate
    make seed
    ```
 
@@ -171,7 +181,7 @@ Run the complete backend suite:
 make test
 ```
 
-The suite covers authentication and session reuse, administrator authorization and account safeguards, account deactivation, activity/security history, profile activity, password changes, CRUD, database constraints, hard-delete behavior, relationships, media previews and storage, search, pulls, and fresh Alembic migrations.
+The suite uses a small isolated seed rather than the larger manual demo dataset. It covers authentication and session reuse, administrator authorization and account safeguards, account deactivation, activity/security history, profile activity, password changes, CRUD, database constraints, hard-delete behavior, relationships, media previews and storage, search, pulls, demo seeding, and fresh Alembic migrations.
 
 ## Deployment Notes
 

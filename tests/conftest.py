@@ -13,7 +13,7 @@ import pytest
 
 from app import database
 from app.database import Base, configure_database
-from app.seed import seed_demo_data
+from app.seed import seed_test_data
 
 
 @pytest.fixture()
@@ -27,7 +27,7 @@ def client(tmp_path: Path) -> Generator[httpx.Client, None, None]:
     from app.database import SessionLocal
 
     with SessionLocal() as db:
-        seed_demo_data(db)
+        seed_test_data(db)
 
     from app.api.auth import login_attempts
 
