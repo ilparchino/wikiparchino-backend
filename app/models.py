@@ -3,10 +3,11 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from enum import StrEnum
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, Float, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import Boolean, CheckConstraint, Float, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
+from app.database_types import UTCDateTime
 
 
 def utcnow() -> datetime:
@@ -60,9 +61,9 @@ class SecurityEventType(StrEnum):
 
 
 class TimestampMixin:
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
+        UTCDateTime(), default=utcnow, onupdate=utcnow, nullable=False
     )
 
 
@@ -92,8 +93,8 @@ class UserSession(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("user_account.id", ondelete="CASCADE", onupdate="CASCADE"), nullable=False)
     token_hash: Mapped[str] = mapped_column(String(128), unique=True, index=True, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
-    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
 
     user: Mapped[UserAccount] = relationship()
 
@@ -243,11 +244,15 @@ class MediaAsset(Base):
     __table_args__ = {"sqlite_autoincrement": True}
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    pullable_id: Mapped[int] = mapped_column(ForeignKey("pullable.id", ondelete="CASCADE", onupdate="CASCADE"), nullable=False)
+    pullable_id: Mapped[int] = mapped_column(
+        ForeignKey("pullable.id", ondelete="CASCADE", onupdate="CASCADE"),
+        index=True,
+        nullable=False,
+    )
     filename: Mapped[str] = mapped_column(String(255), nullable=False)
     content_type: Mapped[str] = mapped_column(String(120), nullable=False)
     disk_path: Mapped[str] = mapped_column(String(500), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow, nullable=False)
     created_by: Mapped[int | None] = mapped_column(
         ForeignKey("user_account.id", ondelete="SET NULL", onupdate="CASCADE"), nullable=True
     )
@@ -280,7 +285,7 @@ class ActivityLog(Base):
     entity_id: Mapped[int] = mapped_column(Integer, nullable=False)
     action: Mapped[str] = mapped_column(String(40), nullable=False)
     payload_json: Mapped[str | None] = mapped_column(Text, nullable=True)
-    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    occurred_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
 
 
 class SecurityEventLog(Base):
@@ -317,4 +322,4 @@ class SecurityEventLog(Base):
     attempted_username: Mapped[str | None] = mapped_column(String(80), nullable=True)
     source_ip: Mapped[str | None] = mapped_column(String(45), nullable=True)
     payload_json: Mapped[str | None] = mapped_column(Text, nullable=True)
-    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    occurred_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)

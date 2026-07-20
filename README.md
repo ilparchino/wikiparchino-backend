@@ -156,6 +156,8 @@ Run `make help` for the complete command list. `make clean` removes reproducible
 
 Relative paths are resolved from the current working directory when supplied through environment variables. Run backend commands from this repository root for predictable results.
 
+All complete timestamps are generated and exchanged in UTC. SQLite stores the normalized UTC clock value without an offset, while the SQLAlchemy UTC type restores timezone information when rows are loaded; API responses therefore include `Z` or `+00:00`. Clients may convert these explicit UTC instants to the user's local timezone for display. Event partial dates are separate calendar values and are not affected by this policy.
+
 ## API Overview
 
 All application endpoints are under `/api`:
