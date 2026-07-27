@@ -153,10 +153,13 @@ Run `make help` for the complete command list. `make clean` removes reproducible
 | `WIKI_PARCHINO_MEDIA_DIR` | `./media` | Uploaded media directory. |
 | `WIKI_PARCHINO_FRONTEND_ORIGINS` | `http://127.0.0.1:5173` | Comma-separated browser origins allowed by CORS. |
 | `WIKI_PARCHINO_SESSION_DAYS` | `14` | Session validity in days. |
+| `WIKI_PARCHINO_ROOT_PATH` | empty | Public URL prefix removed by a reverse proxy, such as `/wikiparchino`. |
 
 Relative paths are resolved from the current working directory when supplied through environment variables. Run backend commands from this repository root for predictable results.
 
 All complete timestamps are generated and exchanged in UTC. SQLite stores the normalized UTC clock value without an offset, while the SQLAlchemy UTC type restores timezone information when rows are loaded; API responses therefore include `Z` or `+00:00`. Clients may convert these explicit UTC instants to the user's local timezone for display. Event partial dates are separate calendar values and are not affected by this policy.
+
+Keep `WIKI_PARCHINO_ROOT_PATH` empty for direct local access. When a reverse proxy strips a public path prefix before forwarding requests, set it to that exact prefix so FastAPI generates working OpenAPI and OAuth redirect URLs.
 
 ## API Overview
 

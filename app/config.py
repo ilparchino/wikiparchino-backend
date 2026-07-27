@@ -13,6 +13,7 @@ class Settings:
     frontend_origins: tuple[str, ...]
     session_days: int
     media_dir: Path
+    root_path: str
 
 
 def env_path(name: str, default: Path) -> Path:
@@ -30,6 +31,15 @@ def env_origins(name: str, default: str) -> tuple[str, ...]:
     return origins
 
 
+def env_root_path(name: str) -> str:
+    value = os.getenv(name, "").strip()
+    if not value or value == "/":
+        return ""
+    if not value.startswith("/") or "://" in value or "?" in value or "#" in value:
+        raise ValueError(f"{name} must be an absolute URL path such as /wikiparchino")
+    return value.rstrip("/")
+
+
 def get_settings() -> Settings:
     return Settings(
         database_url=os.getenv(
@@ -41,4 +51,5 @@ def get_settings() -> Settings:
         ),
         session_days=int(os.getenv("WIKI_PARCHINO_SESSION_DAYS", "14")),
         media_dir=env_path("WIKI_PARCHINO_MEDIA_DIR", BACKEND_DIR / "media"),
+        root_path=env_root_path("WIKI_PARCHINO_ROOT_PATH"),
     )

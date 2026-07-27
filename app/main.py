@@ -12,8 +12,12 @@ from app.schemas import UserOut
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="Wiki Parchino API", version="0.1.0")
     settings = get_settings()
+    app = FastAPI(
+        title="Wiki Parchino API",
+        version="0.1.0",
+        root_path=settings.root_path,
+    )
     app.add_middleware(
         CORSMiddleware,
         allow_origins=list(settings.frontend_origins),
