@@ -6,7 +6,9 @@ from fastapi import FastAPI
 import httpx
 import pytest
 
+from app import database
 from app.config import env_root_path, get_settings
+from app.database import Base
 from app.main import create_app
 
 
@@ -20,6 +22,17 @@ def app_get(app: FastAPI, path: str) -> httpx.Response:
             return await client.get(path)
 
     return asyncio.run(request())
+
+
+@pytest.fixture(autouse=True)
+def isolated_database(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database_url = f"sqlite:///{tmp_path / 'root-path.sqlite'}"
+    monkeypatch.setenv("WIKI_PARCHINO_DATABASE_URL", database_url)
+    database.configure_database(database_url)
+    Base.metadata.create_all(bind=database.engine)
 
 
 @pytest.mark.parametrize(

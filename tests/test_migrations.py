@@ -235,3 +235,80 @@ def test_activity_migration_rejects_unsupported_existing_values(
 
     with pytest.raises(RuntimeError, match="unsupported entity types: unknown; actions: unsupported"):
         command.upgrade(config, "head")
+
+
+def test_maintenance_migration_preserves_existing_data_and_downgrades(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    db_path = tmp_path / "maintenance-migration.sqlite"
+    database_url = f"sqlite:///{db_path}"
+    monkeypatch.setenv("WIKI_PARCHINO_DATABASE_URL", database_url)
+    backend_dir = Path(__file__).resolve().parents[1]
+    config = migration_config(backend_dir)
+    command.upgrade(config, "0004_admin_security_events")
+
+    engine = create_engine(database_url)
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "insert into user_account "
+                "(id, username, display_name, password_hash, is_active, is_admin, "
+                "created_at, updated_at) values "
+                "(1, 'existing', 'Existing', 'hash', 1, 1, "
+                "'2026-07-29 10:00:00', '2026-07-29 10:00:00')"
+            )
+        )
+    engine.dispose()
+
+    command.upgrade(config, "head")
+    engine = create_engine(database_url)
+    with engine.begin() as connection:
+        assert connection.execute(
+            text("select username from user_account where id = 1")
+        ).scalar_one() == "existing"
+        table_sql = connection.execute(
+            text(
+                "select sql from sqlite_master "
+                "where type = 'table' and name = 'maintenance_window'"
+            )
+        ).scalar_one()
+        assert "AUTOINCREMENT" in table_sql.upper()
+        assert "ck_maintenance_window_open_slot" in table_sql
+        indexes = {
+            row["name"]
+            for row in connection.execute(
+                text("pragma index_list(maintenance_window)")
+            ).mappings()
+        }
+        assert "ix_maintenance_window_announced_at" in indexes
+        connection.execute(
+            text(
+                "insert into maintenance_window "
+                "(open_slot, announced_at, starts_at, message) "
+                "values (1, '2026-07-29 10:00:00', '2026-07-29 10:15:00', 'Test')"
+            )
+        )
+        with pytest.raises(IntegrityError):
+            connection.execute(
+                text(
+                    "insert into maintenance_window "
+                    "(open_slot, announced_at, starts_at) "
+                    "values (1, '2026-07-29 11:00:00', '2026-07-29 11:15:00')"
+                )
+            )
+    engine.dispose()
+
+    command.downgrade(config, "0004_admin_security_events")
+    engine = create_engine(database_url)
+    with engine.connect() as connection:
+        tables = set(
+            connection.execute(
+                text("select name from sqlite_master where type='table'")
+            ).scalars()
+        )
+        assert "maintenance_window" not in tables
+        assert connection.execute(
+            text("select username from user_account where id = 1")
+        ).scalar_one() == "existing"
+    engine.dispose()

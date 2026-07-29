@@ -152,8 +152,11 @@ Run `make help` for the complete command list. `make clean` removes reproducible
 | `WIKI_PARCHINO_DATABASE_URL` | `sqlite:///./wiki_parchino.db` | SQLAlchemy database URL. |
 | `WIKI_PARCHINO_MEDIA_DIR` | `./media` | Uploaded media directory. |
 | `WIKI_PARCHINO_FRONTEND_ORIGINS` | `http://127.0.0.1:5173` | Comma-separated browser origins allowed by CORS. |
+| `WIKI_PARCHINO_FRONTEND_URL` | First configured origin | Complete public frontend URL included in Telegram notifications. |
 | `WIKI_PARCHINO_SESSION_DAYS` | `14` | Session validity in days. |
 | `WIKI_PARCHINO_ROOT_PATH` | empty | Public URL prefix removed by a reverse proxy, such as `/wikiparchino`. |
+| `WIKI_PARCHINO_TELEGRAM_BOT_TOKEN` | empty | Secret token used only for outbound maintenance notifications. |
+| `WIKI_PARCHINO_TELEGRAM_CHAT_ID` | empty | Target group for maintenance notifications. |
 
 Relative paths are resolved from the current working directory when supplied through environment variables. Run backend commands from this repository root for predictable results.
 
@@ -166,6 +169,7 @@ Keep `WIKI_PARCHINO_ROOT_PATH` empty for direct local access. When a reverse pro
 All application endpoints are under `/api`:
 
 - `/auth/login`, `/auth/logout`, and `/me`
+- `/maintenance/status` (public and non-cacheable)
 - `/profile` and `/profile/password`
 - `/admin/summary`, `/admin/users`, and `/admin/activity` (administrators only)
 - `/people`, `/places`, `/epochs`, and `/events`
@@ -174,9 +178,30 @@ All application endpoints are under `/api`:
 - `/pulls/random` and `/pulls/daily`
 - `/media`, `/media/previews`, and `/media/{id}`
 
-Except for health and login, application endpoints require `Authorization: Bearer <token>`. Login returns the opaque token once; the server stores only its hash. Routes below `/api/admin` additionally require an active account with `is_admin = true`; this is enforced by the backend and does not depend on frontend visibility.
+Except for health, maintenance status, and login, application endpoints require `Authorization: Bearer <token>`. Login returns the opaque token once; the server stores only its hash. Routes below `/api/admin` additionally require an active account with `is_admin = true`; this is enforced by the backend and does not depend on frontend visibility.
 
 Administrators deactivate accounts instead of deleting them. Deactivation immediately revokes all sessions while preserving attribution and activity history; reactivation permits a future login but does not create a session. Content actions remain in `activity_log`. Account and access actions are stored separately in `security_event_log`; authentication events are pruned after 90 days and credential material is never logged. The OpenAPI UI is the authoritative interactive endpoint reference.
+
+## Maintenance Mode
+
+Maintenance is controlled from the backend command line, not from the administrator API. Scheduling immediately prevents new logins while existing sessions remain usable until the deadline. At the deadline, the first request atomically revokes every session and all routes return `503 Service Unavailable` except `/api/maintenance/status`, `/api/health`, and CORS preflights.
+
+```bash
+make maintenance-schedule MINUTES=15 MESSAGE="Aggiornamento del server"
+make maintenance-status
+make maintenance-end
+```
+
+`MINUTES` must be between `0` and `10080`. Ending before the deadline cancels maintenance; ending afterward reopens the API, but revoked sessions remain invalid.
+
+When both Telegram variables are configured, scheduling and ending maintenance send short-lived outbound notifications to the configured group. The sender performs one HTTPS request and exits: it does not read messages, poll Telegram, expose a webhook, or run as a service. Delivery is best-effort, so a Telegram failure prints a warning without undoing the maintenance transition. Retry or verify notifications with:
+
+```bash
+make maintenance-notify
+make telegram-test
+```
+
+Keep the real bot token only in the protected backend environment file. Never put it in command arguments, Git, frontend variables, or SQLite.
 
 ## Testing
 
@@ -186,7 +211,7 @@ Run the complete backend suite:
 make test
 ```
 
-The suite uses a small isolated seed rather than the larger manual demo dataset. It covers authentication and session reuse, administrator authorization and account safeguards, account deactivation, activity/security history, profile activity, password changes, CRUD, database constraints, hard-delete behavior, relationships, media previews and storage, search, pulls, demo seeding, and fresh Alembic migrations.
+The suite uses a small isolated seed rather than the larger manual demo dataset. It covers authentication and session reuse, maintenance enforcement and Telegram delivery failures, administrator authorization and account safeguards, account deactivation, activity/security history, profile activity, password changes, CRUD, database constraints, hard-delete behavior, relationships, media previews and storage, search, pulls, demo seeding, and fresh Alembic migrations.
 
 ## Deployment Notes
 

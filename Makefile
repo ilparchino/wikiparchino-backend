@@ -10,7 +10,7 @@ DOTENV = $(PYTHON) -m dotenv -f $(ENV_FILE) run --
 
 .DEFAULT_GOAL := help
 
-.PHONY: help install check-env migrate revision seed user dev test run clean
+.PHONY: help install check-env migrate revision seed user maintenance-schedule maintenance-status maintenance-end maintenance-notify telegram-test dev test run clean
 
 help:
 	@printf '%s\n' \
@@ -20,6 +20,11 @@ help:
 		'  make revision MESSAGE=""  Generate a migration after model changes' \
 		'  make seed                 Load demo users and content' \
 		'  make user                 Interactively create or update a fixed account' \
+		'  make maintenance-schedule MINUTES=15 MESSAGE="..."' \
+		'  make maintenance-status   Show the current maintenance state' \
+		'  make maintenance-end      End or cancel maintenance' \
+		'  make maintenance-notify   Retry the latest pending notification' \
+		'  make telegram-test        Send a Telegram configuration test' \
 		'  make dev                  Start the development API server' \
 		'  make test                 Run the complete backend test suite' \
 		'  make run CMD="<command>"  Run any command with variables from .env' \
@@ -53,6 +58,22 @@ seed: migrate
 
 user: migrate
 	$(DOTENV) $(PYTHON) -m app.manage_users
+
+maintenance-schedule: migrate
+	@test -n "$(MINUTES)" || { echo 'Usage: make maintenance-schedule MINUTES=15 MESSAGE="..."'; exit 1; }
+	$(DOTENV) $(PYTHON) -m app.manage_maintenance schedule --minutes "$(MINUTES)" $(if $(strip $(MESSAGE)),--message "$(MESSAGE)",)
+
+maintenance-status: migrate
+	$(DOTENV) $(PYTHON) -m app.manage_maintenance status
+
+maintenance-end: migrate
+	$(DOTENV) $(PYTHON) -m app.manage_maintenance end
+
+maintenance-notify: migrate
+	$(DOTENV) $(PYTHON) -m app.manage_maintenance notify
+
+telegram-test: check-env
+	$(DOTENV) $(PYTHON) -m app.manage_maintenance telegram-test
 
 dev: check-env
 	$(DOTENV) $(PYTHON) -m uvicorn app.main:app --reload --host $(HOST) --port $(PORT)

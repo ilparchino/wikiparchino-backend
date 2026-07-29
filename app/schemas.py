@@ -125,6 +125,16 @@ class LoginOut(BaseModel):
     user: UserOut
 
 
+class MaintenanceStatusOut(BaseModel):
+    state: Literal["available", "scheduled", "active"]
+    server_time: datetime
+    announced_at: datetime | None = None
+    starts_at: datetime | None = None
+    message: str | None = None
+    login_allowed: bool
+    api_available: bool
+
+
 class PasswordChangeIn(BaseModel):
     current_password: str = Field(min_length=1, max_length=MAX_PASSWORD_LENGTH)
     new_password: str = Field(

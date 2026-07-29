@@ -3,7 +3,18 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from enum import StrEnum
 
-from sqlalchemy import Boolean, CheckConstraint, Float, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    CheckConstraint,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -97,6 +108,60 @@ class UserSession(Base):
     expires_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
 
     user: Mapped[UserAccount] = relationship()
+
+
+class MaintenanceWindow(Base):
+    __tablename__ = "maintenance_window"
+    __table_args__ = (
+        CheckConstraint(
+            "starts_at >= announced_at",
+            name="ck_maintenance_window_start_after_announcement",
+        ),
+        CheckConstraint(
+            "message is null or length(message) <= 500",
+            name="ck_maintenance_window_message_length",
+        ),
+        CheckConstraint(
+            "(ended_at is null and open_slot = 1) or "
+            "(ended_at is not null and open_slot is null)",
+            name="ck_maintenance_window_open_slot",
+        ),
+        CheckConstraint(
+            "ended_at is null or ended_at >= announced_at",
+            name="ck_maintenance_window_end_after_announcement",
+        ),
+        CheckConstraint(
+            "(sessions_revoked_at is null and sessions_revoked_count is null) or "
+            "(sessions_revoked_at is not null and sessions_revoked_count >= 0)",
+            name="ck_maintenance_window_session_revocation",
+        ),
+        UniqueConstraint("open_slot", name="uq_maintenance_window_open_slot"),
+        Index("ix_maintenance_window_announced_at", "announced_at"),
+        {"sqlite_autoincrement": True},
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    open_slot: Mapped[int | None] = mapped_column(Integer, default=1, nullable=True)
+    announced_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    starts_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    message: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    sessions_revoked_at: Mapped[datetime | None] = mapped_column(
+        UTCDateTime(), nullable=True
+    )
+    sessions_revoked_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    ended_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    telegram_schedule_sent_at: Mapped[datetime | None] = mapped_column(
+        UTCDateTime(), nullable=True
+    )
+    telegram_schedule_message_id: Mapped[int | None] = mapped_column(
+        BigInteger, nullable=True
+    )
+    telegram_end_sent_at: Mapped[datetime | None] = mapped_column(
+        UTCDateTime(), nullable=True
+    )
+    telegram_end_message_id: Mapped[int | None] = mapped_column(
+        BigInteger, nullable=True
+    )
 
 
 class Pullable(Base, AttributionMixin):

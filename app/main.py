@@ -4,9 +4,20 @@ from fastapi import FastAPI
 from fastapi import Depends
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import admin, auth, entities, media, profile, pulls, relationships, search
+from app.api import (
+    admin,
+    auth,
+    entities,
+    maintenance,
+    media,
+    profile,
+    pulls,
+    relationships,
+    search,
+)
 from app.api.deps import current_user
 from app.config import get_settings
+from app.maintenance_middleware import MaintenanceMiddleware
 from app.models import UserAccount
 from app.schemas import UserOut
 
@@ -18,6 +29,7 @@ def create_app() -> FastAPI:
         version="0.1.0",
         root_path=settings.root_path,
     )
+    app.add_middleware(MaintenanceMiddleware)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=list(settings.frontend_origins),
@@ -27,6 +39,7 @@ def create_app() -> FastAPI:
     )
 
     app.include_router(auth.router, prefix="/api")
+    app.include_router(maintenance.router, prefix="/api")
     app.include_router(entities.router, prefix="/api")
     app.include_router(relationships.router, prefix="/api")
     app.include_router(media.router, prefix="/api")
