@@ -12,6 +12,7 @@ from app.manage_maintenance import (
     MaintenanceCommandError,
     command_schedule,
     end_maintenance,
+    end_text,
     notify_window,
     schedule_maintenance,
 )
@@ -176,6 +177,9 @@ def test_schedule_and_end_notifications_are_recorded_and_not_duplicated(
     assert "tra 15 minuti" in sent[0]["text"]
     assert "Aggiornamento del server" in sent[0]["text"]
     assert "https://ilparchino.github.io/wikiparchino" in sent[0]["text"]
+    assert sent[0]["text"].startswith("🛠️ Manutenzione programmata")
+    assert "📝 Motivo:" in sent[0]["text"]
+    assert sent[1]["text"].startswith("✅ Manutenzione completata")
     assert "nuovamente disponibile" in sent[1]["text"]
     maintenance_db.refresh(ended)
     assert ended.telegram_schedule_message_id == 1
@@ -219,6 +223,13 @@ def test_cancel_notification_and_delivery_failure_preserve_database_transition(
     )
     assert cancelled is True
     assert result.sent is True
+    assert result.detail == "Notifica Telegram inviata."
+    assert end_text(ended, "https://example.test", True).startswith(
+        "✅ Manutenzione annullata"
+    )
+    assert "🟢 Wiki Parchino resterà disponibile" in end_text(
+        ended, "https://example.test", True
+    )
 
 
 def test_schedule_validation_and_single_open_window(maintenance_db) -> None:

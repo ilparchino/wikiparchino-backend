@@ -101,10 +101,11 @@ def schedule_text(window: MaintenanceWindow, frontend_url: str) -> str:
     )
     reason = window.message or DEFAULT_MAINTENANCE_MESSAGE
     return (
-        f"⚠ Wiki Parchino entrerà in manutenzione {timing}. ⚠\n"
-        "Durante la manutenzione il servizio non sarà disponibile.\n\n"
-        f"Dettagli: {reason}\n\n"
-        f"{frontend_url}"
+        "🛠️ Manutenzione programmata\n\n"
+        f"⏳ Wiki Parchino entrerà in manutenzione {timing}.\n"
+        "🚧 Durante l'intervento il servizio non sarà disponibile.\n\n"
+        f"📝 Motivo: {reason}\n\n"
+        f"🔗 Apri Wiki Parchino:\n{frontend_url}"
     )
 
 
@@ -115,13 +116,15 @@ def end_text(
 ) -> str:
     if cancelled:
         return (
-            "❌ La manutenzione programmata di Wiki Parchino è stata annullata.\n\n"
-            f"{frontend_url}"
+            "✅ Manutenzione annullata\n\n"
+            "🟢 Wiki Parchino resterà disponibile: "
+            "l'intervento programmato è stato annullato.\n\n"
+            f"🔗 Apri Wiki Parchino:\n{frontend_url}"
         )
     return (
-        "✔ La manutenzione di Wiki Parchino è terminata. "
-        "Il servizio è nuovamente disponibile.\n\n"
-        f"{frontend_url}"
+        "✅ Manutenzione completata\n\n"
+        "🎉 Wiki Parchino è nuovamente disponibile.\n\n"
+        f"🔗 Apri Wiki Parchino:\n{frontend_url}"
     )
 
 
