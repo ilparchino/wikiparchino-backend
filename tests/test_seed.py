@@ -29,6 +29,7 @@ from app.models import (
 )
 from app.security import verify_password
 from app.seed import DEMO_PASSWORD, SeedDataError, seed_demo_data, seed_test_data
+from app.partial_dates import PartialDate, event_epoch_conflict
 
 
 def database_session(tmp_path: Path, name: str = "seed.sqlite") -> Session:
@@ -86,6 +87,24 @@ def test_rich_demo_seed_is_anonymized_complete_and_consistent(tmp_path: Path) ->
         assert {epoch.name for epoch in db.query(Epoch).all()} == {
             f"Epoca #{index}" for index in range(1, 6)
         }
+        epoch_shapes = {
+            (
+                epoch.start_year is not None,
+                epoch.start_month is not None,
+                epoch.start_day is not None,
+                epoch.end_year is not None,
+                epoch.end_month is not None,
+                epoch.end_day is not None,
+            )
+            for epoch in db.query(Epoch).all()
+        }
+        assert epoch_shapes == {
+            (False, False, False, False, False, False),
+            (True, False, False, False, False, False),
+            (False, False, False, True, True, False),
+            (True, True, False, True, True, True),
+            (True, True, True, True, False, False),
+        }
         assert {event.title for event in db.query(Event).all()} == {
             f"Evento #{index}" for index in range(1, 41)
         }
@@ -108,6 +127,23 @@ def test_rich_demo_seed_is_anonymized_complete_and_consistent(tmp_path: Path) ->
         assert db.query(Person).filter(Person.description.is_(None)).count() > 0
 
         events = db.query(Event).all()
+        assert all(
+            event_epoch_conflict(
+                PartialDate(event.year, event.month, event.day),
+                PartialDate(
+                    event.epoch.start_year,
+                    event.epoch.start_month,
+                    event.epoch.start_day,
+                ),
+                PartialDate(
+                    event.epoch.end_year,
+                    event.epoch.end_month,
+                    event.epoch.end_day,
+                ),
+            )
+            is None
+            for event in events
+        )
         date_shapes = {
             (event.year is not None, event.month is not None, event.day is not None)
             for event in events

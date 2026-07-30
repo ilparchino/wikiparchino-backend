@@ -263,6 +263,200 @@ def test_event_allows_empty_and_partial_date(auth_client: httpx.Client) -> None:
     assert empty.json()["year"] is None
 
 
+def test_epoch_partial_dates_and_gregorian_validation(
+    auth_client: httpx.Client,
+) -> None:
+    ambiguous = auth_client.post(
+        "/api/epochs",
+        json={
+            "name": "Epoca parziale",
+            "description": None,
+            "start_year": 2025,
+            "start_month": None,
+            "start_day": None,
+            "end_year": 2025,
+            "end_month": 3,
+            "end_day": None,
+            "rarity": 1.0,
+        },
+    )
+    assert ambiguous.status_code == 201
+    assert ambiguous.json()["start_year"] == 2025
+    assert ambiguous.json()["end_month"] == 3
+
+    inverted = auth_client.post(
+        "/api/epochs",
+        json={
+            "name": "Epoca invertita",
+            "start_year": 2025,
+            "start_month": 4,
+            "end_year": 2025,
+            "end_month": 3,
+            "rarity": 1.0,
+        },
+    )
+    assert inverted.status_code == 422
+
+    invalid_epoch_day = auth_client.post(
+        "/api/epochs",
+        json={
+            "name": "Epoca impossibile",
+            "start_year": 2025,
+            "start_month": 2,
+            "start_day": 29,
+            "rarity": 1.0,
+        },
+    )
+    assert invalid_epoch_day.status_code == 422
+
+    place = auth_client.get("/api/places").json()[0]
+    leap_epoch = auth_client.post(
+        "/api/epochs",
+        json={
+            "name": "Epoca bisestile",
+            "start_year": 2024,
+            "end_year": 2024,
+            "rarity": 1.0,
+        },
+    ).json()
+    leap_event = auth_client.post(
+        "/api/events",
+        json={
+            "title": "Giorno bisestile",
+            "place_id": place["id"],
+            "epoch_id": leap_epoch["id"],
+            "year": 2024,
+            "month": 2,
+            "day": 29,
+            "rarity": 1.0,
+        },
+    )
+    assert leap_event.status_code == 201
+
+    invalid_event_day = auth_client.post(
+        "/api/events",
+        json={
+            "title": "Giorno impossibile",
+            "place_id": place["id"],
+            "epoch_id": leap_epoch["id"],
+            "year": 2025,
+            "month": 2,
+            "day": 29,
+            "rarity": 1.0,
+        },
+    )
+    assert invalid_event_day.status_code == 422
+
+
+def test_event_epoch_range_validation_and_epoch_update_conflicts(
+    auth_client: httpx.Client,
+) -> None:
+    place = auth_client.get("/api/places").json()[0]
+    epoch = auth_client.post(
+        "/api/epochs",
+        json={
+            "name": "Epoca delimitata",
+            "start_year": 2020,
+            "start_month": 3,
+            "end_year": 2025,
+            "end_month": 6,
+            "rarity": 1.0,
+        },
+    ).json()
+
+    def create_event(title: str, year: int, month: int | None = None) -> httpx.Response:
+        return auth_client.post(
+            "/api/events",
+            json={
+                "title": title,
+                "place_id": place["id"],
+                "epoch_id": epoch["id"],
+                "year": year,
+                "month": month,
+                "day": None,
+                "rarity": 1.0,
+            },
+        )
+
+    before = create_event("Prima dell'epoca", 2019)
+    assert before.status_code == 422
+    assert "precedente" in before.json()["detail"]
+
+    overlapping = create_event("Data ambigua", 2020)
+    assert overlapping.status_code == 201
+    event_id = overlapping.json()["id"]
+
+    after = create_event("Dopo l'epoca", 2026)
+    assert after.status_code == 422
+    assert "successiva" in after.json()["detail"]
+
+    rejected_update = auth_client.put(
+        f"/api/events/{event_id}",
+        json={
+            "title": "Data ambigua",
+            "place_id": place["id"],
+            "epoch_id": epoch["id"],
+            "year": 2026,
+            "month": None,
+            "day": None,
+            "rarity": 1.0,
+        },
+    )
+    assert rejected_update.status_code == 422
+    assert auth_client.get(f"/api/events/{event_id}").json()["year"] == 2020
+
+    epoch_before = auth_client.get(f"/api/epochs/{epoch['id']}").json()
+    rejected_epoch_update = auth_client.put(
+        f"/api/epochs/{epoch['id']}",
+        json={
+            "name": epoch["name"],
+            "description": epoch["description"],
+            "start_year": 2021,
+            "start_month": None,
+            "start_day": None,
+            "end_year": None,
+            "end_month": None,
+            "end_day": None,
+            "rarity": epoch["rarity"],
+        },
+    )
+    assert rejected_epoch_update.status_code == 409
+    assert "Data ambigua" in rejected_epoch_update.json()["detail"]
+    epoch_after = auth_client.get(f"/api/epochs/{epoch['id']}").json()
+    assert epoch_after["start_year"] == epoch_before["start_year"]
+    assert epoch_after["updated_at"] == epoch_before["updated_at"]
+
+    start_only = auth_client.post(
+        "/api/epochs",
+        json={"name": "Solo inizio", "start_year": 2024, "rarity": 1.0},
+    ).json()
+    assert auth_client.post(
+        "/api/events",
+        json={
+            "title": "Troppo presto",
+            "place_id": place["id"],
+            "epoch_id": start_only["id"],
+            "year": 2023,
+            "rarity": 1.0,
+        },
+    ).status_code == 422
+
+    end_only = auth_client.post(
+        "/api/epochs",
+        json={"name": "Solo fine", "end_year": 2024, "rarity": 1.0},
+    ).json()
+    assert auth_client.post(
+        "/api/events",
+        json={
+            "title": "Troppo tardi",
+            "place_id": place["id"],
+            "epoch_id": end_only["id"],
+            "year": 2025,
+            "rarity": 1.0,
+        },
+    ).status_code == 422
+
+
 def test_relationships_and_pulls(auth_client: httpx.Client) -> None:
     people = auth_client.get("/api/people").json()
     events = auth_client.get("/api/events").json()

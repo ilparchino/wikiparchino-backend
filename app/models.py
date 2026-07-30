@@ -250,12 +250,95 @@ class Place(Base, PullableEntityMixin):
 
 class Epoch(Base, PullableEntityMixin):
     __tablename__ = "epoch"
+    __table_args__ = (
+        CheckConstraint(
+            "start_year is null or start_year >= 1900",
+            name="ck_epoch_start_year_min",
+        ),
+        CheckConstraint(
+            "start_month is null or start_month between 1 and 12",
+            name="ck_epoch_start_month_range",
+        ),
+        CheckConstraint(
+            "start_day is null or start_day between 1 and 31",
+            name="ck_epoch_start_day_range",
+        ),
+        CheckConstraint(
+            "start_month is null or start_year is not null",
+            name="ck_epoch_start_month_requires_year",
+        ),
+        CheckConstraint(
+            "start_day is null or start_month is not null",
+            name="ck_epoch_start_day_requires_month",
+        ),
+        CheckConstraint(
+            "start_day is null or start_day <= "
+            "case "
+            "when start_month = 2 then "
+            "case when start_year % 400 = 0 or "
+            "(start_year % 4 = 0 and start_year % 100 != 0) then 29 else 28 end "
+            "when start_month in (4, 6, 9, 11) then 30 "
+            "else 31 end",
+            name="ck_epoch_start_day_valid_for_month",
+        ),
+        CheckConstraint(
+            "end_year is null or end_year >= 1900",
+            name="ck_epoch_end_year_min",
+        ),
+        CheckConstraint(
+            "end_month is null or end_month between 1 and 12",
+            name="ck_epoch_end_month_range",
+        ),
+        CheckConstraint(
+            "end_day is null or end_day between 1 and 31",
+            name="ck_epoch_end_day_range",
+        ),
+        CheckConstraint(
+            "end_month is null or end_year is not null",
+            name="ck_epoch_end_month_requires_year",
+        ),
+        CheckConstraint(
+            "end_day is null or end_month is not null",
+            name="ck_epoch_end_day_requires_month",
+        ),
+        CheckConstraint(
+            "end_day is null or end_day <= "
+            "case "
+            "when end_month = 2 then "
+            "case when end_year % 400 = 0 or "
+            "(end_year % 4 = 0 and end_year % 100 != 0) then 29 else 28 end "
+            "when end_month in (4, 6, 9, 11) then 30 "
+            "else 31 end",
+            name="ck_epoch_end_day_valid_for_month",
+        ),
+        CheckConstraint(
+            "start_year is null or end_year is null or "
+            "(start_year * 10000 + coalesce(start_month, 1) * 100 + "
+            "coalesce(start_day, 1)) <= "
+            "(end_year * 10000 + coalesce(end_month, 12) * 100 + "
+            "case "
+            "when end_day is not null then end_day "
+            "when end_month is null then 31 "
+            "when end_month = 2 then "
+            "case when end_year % 400 = 0 or "
+            "(end_year % 4 = 0 and end_year % 100 != 0) then 29 else 28 end "
+            "when end_month in (4, 6, 9, 11) then 30 "
+            "else 31 end)",
+            name="ck_epoch_date_order",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(
         ForeignKey("pullable.id", ondelete="CASCADE", onupdate="CASCADE"), primary_key=True
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    start_year: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    start_month: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    start_day: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    end_year: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    end_month: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    end_day: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     pullable: Mapped[Pullable] = relationship()
 
@@ -268,6 +351,16 @@ class Event(Base, PullableEntityMixin):
         CheckConstraint("day is null or (day between 1 and 31)", name="ck_event_day_range"),
         CheckConstraint("month is null or year is not null", name="ck_event_month_requires_year"),
         CheckConstraint("day is null or month is not null", name="ck_event_day_requires_month"),
+        CheckConstraint(
+            "day is null or day <= "
+            "case "
+            "when month = 2 then "
+            "case when year % 400 = 0 or "
+            "(year % 4 = 0 and year % 100 != 0) then 29 else 28 end "
+            "when month in (4, 6, 9, 11) then 30 "
+            "else 31 end",
+            name="ck_event_day_valid_for_month",
+        ),
     )
 
     id: Mapped[int] = mapped_column(

@@ -16,6 +16,7 @@ from app.api.utils import (
 from app.database import get_db
 from app.media_storage import commit_staged_deletion
 from app.models import ActivityAction, EntityType, Epoch, Event, Person, Place, UserAccount, utcnow
+from app.partial_dates import PartialDate, event_epoch_conflict
 from app.schemas import (
     EpochCreate,
     EpochOut,
@@ -32,6 +33,39 @@ from app.schemas import (
 )
 
 router = APIRouter(tags=["entities"])
+
+
+def epoch_start(epoch: Epoch | EpochCreate | EpochUpdate) -> PartialDate:
+    return PartialDate(epoch.start_year, epoch.start_month, epoch.start_day)
+
+
+def epoch_end(epoch: Epoch | EpochCreate | EpochUpdate) -> PartialDate:
+    return PartialDate(epoch.end_year, epoch.end_month, epoch.end_day)
+
+
+def event_date(event: Event | EventCreate | EventUpdate) -> PartialDate:
+    return PartialDate(event.year, event.month, event.day)
+
+
+def validate_event_epoch(
+    event: Event | EventCreate | EventUpdate,
+    epoch: Epoch,
+) -> None:
+    conflict = event_epoch_conflict(
+        event_date(event),
+        epoch_start(epoch),
+        epoch_end(epoch),
+    )
+    if conflict == "before":
+        detail = "La data dell'evento è precedente all'inizio dell'epoca selezionata"
+    elif conflict == "after":
+        detail = "La data dell'evento è successiva alla fine dell'epoca selezionata"
+    else:
+        return
+    raise HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        detail=detail,
+    )
 
 
 def split_rarity(payload) -> tuple[dict, float]:
@@ -166,6 +200,27 @@ def update_epoch(
     epoch_id: int, payload: EpochUpdate, user: UserAccount = Depends(current_user), db: Session = Depends(get_db)
 ) -> Epoch:
     item = active_or_404(db, Epoch, epoch_id)
+    incompatible = [
+        event.title
+        for event in db.query(Event).filter(Event.epoch_id == epoch_id).all()
+        if event_epoch_conflict(
+            event_date(event),
+            epoch_start(payload),
+            epoch_end(payload),
+        )
+        is not None
+    ]
+    if incompatible:
+        preview = ", ".join(incompatible[:5])
+        if len(incompatible) > 5:
+            preview += f" e altri {len(incompatible) - 5}"
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Le nuove date dell'epoca escluderebbero eventi già collegati: "
+                f"{preview}"
+            ),
+        )
     data, rarity = split_rarity(payload)
     for key, value in data.items():
         setattr(item, key, value)
@@ -201,7 +256,8 @@ def list_events(user: UserAccount = Depends(current_user), db: Session = Depends
 @router.post("/events", response_model=EventOut, status_code=status.HTTP_201_CREATED)
 def create_event(payload: EventCreate, user: UserAccount = Depends(current_user), db: Session = Depends(get_db)) -> Event:
     ensure_reference(db, Place, payload.place_id, "luogo")
-    ensure_reference(db, Epoch, payload.epoch_id, "epoca")
+    epoch = ensure_reference(db, Epoch, payload.epoch_id, "epoca")
+    validate_event_epoch(payload, epoch)
     data, rarity = split_rarity(payload)
     timestamp = utcnow()
     pullable = create_pullable(db, rarity, user.id, timestamp)
@@ -223,7 +279,8 @@ def update_event(
     event_id: int, payload: EventUpdate, user: UserAccount = Depends(current_user), db: Session = Depends(get_db)
 ) -> Event:
     ensure_reference(db, Place, payload.place_id, "luogo")
-    ensure_reference(db, Epoch, payload.epoch_id, "epoca")
+    epoch = ensure_reference(db, Epoch, payload.epoch_id, "epoca")
+    validate_event_epoch(payload, epoch)
     item = active_or_404(db, Event, event_id)
     data, rarity = split_rarity(payload)
     for key, value in data.items():

@@ -391,3 +391,166 @@ def test_owner_migration_preserves_users_and_enforces_invariants(
         assert "is_owner" not in columns
         assert connection.execute(text("select count(*) from user_account")).scalar_one() == 4
     engine.dispose()
+
+
+def test_epoch_partial_date_migration_preserves_data_and_enforces_dates(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    db_path = tmp_path / "epoch-partial-dates.sqlite"
+    database_url = f"sqlite:///{db_path}"
+    monkeypatch.setenv("WIKI_PARCHINO_DATABASE_URL", database_url)
+    backend_dir = Path(__file__).resolve().parents[1]
+    config = migration_config(backend_dir)
+    command.upgrade(config, "0006_protected_owner")
+
+    engine = create_engine(database_url)
+    timestamp = "2026-07-30 10:00:00"
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "insert into user_account "
+                "(id, username, display_name, password_hash, is_active, is_admin, "
+                "is_owner, created_at, updated_at) values "
+                "(1, 'existing', 'Existing', 'hash', 1, 1, 1, :time, :time)"
+            ),
+            {"time": timestamp},
+        )
+        connection.execute(
+            text(
+                "insert into pullable "
+                "(id, rarity, created_at, updated_at, created_by, updated_by) values "
+                "(10, 1.0, :time, :time, 1, 1), "
+                "(11, 1.0, :time, :time, 1, 1), "
+                "(12, 1.0, :time, :time, 1, 1)"
+            ),
+            {"time": timestamp},
+        )
+        connection.execute(
+            text(
+                "insert into place (id, name, description) "
+                "values (10, 'Luogo esistente', null)"
+            )
+        )
+        connection.execute(
+            text(
+                "insert into epoch (id, name, description) "
+                "values (11, 'Epoca esistente', 'Da conservare')"
+            )
+        )
+        connection.execute(
+            text(
+                "insert into event "
+                "(id, epoch_id, place_id, title, year, month, day) "
+                "values (12, 11, 10, 'Evento esistente', 2024, 2, 29)"
+            )
+        )
+    engine.dispose()
+
+    command.upgrade(config, "head")
+    engine = create_engine(database_url)
+    with engine.begin() as connection:
+        epoch = connection.execute(
+            text("select * from epoch where id = 11")
+        ).mappings().one()
+        assert epoch["name"] == "Epoca esistente"
+        assert epoch["description"] == "Da conservare"
+        assert epoch["start_year"] is None
+        assert epoch["end_year"] is None
+        event = connection.execute(
+            text("select year, month, day from event where id = 12")
+        ).one()
+        assert event == (2024, 2, 29)
+
+        epoch_sql = connection.execute(
+            text(
+                "select sql from sqlite_master "
+                "where type = 'table' and name = 'epoch'"
+            )
+        ).scalar_one()
+        event_sql = connection.execute(
+            text(
+                "select sql from sqlite_master "
+                "where type = 'table' and name = 'event'"
+            )
+        ).scalar_one()
+        assert "ck_epoch_date_order" in epoch_sql
+        assert "ck_epoch_start_day_valid_for_month" in epoch_sql
+        assert "ck_epoch_end_day_valid_for_month" in epoch_sql
+        assert "ck_event_day_valid_for_month" in event_sql
+
+        with pytest.raises(IntegrityError):
+            connection.execute(
+                text(
+                    "update event set year = 2025, month = 2, day = 29 "
+                    "where id = 12"
+                )
+            )
+        with pytest.raises(IntegrityError):
+            connection.execute(
+                text(
+                    "update epoch set start_year = 2025, start_month = 4, "
+                    "end_year = 2025, end_month = 3 where id = 11"
+                )
+            )
+        assert connection.exec_driver_sql("pragma foreign_key_check").all() == []
+    engine.dispose()
+
+    command.downgrade(config, "0006_protected_owner")
+    engine = create_engine(database_url)
+    with engine.connect() as connection:
+        epoch_columns = {
+            row["name"]
+            for row in connection.execute(text("pragma table_info(epoch)")).mappings()
+        }
+        assert "start_year" not in epoch_columns
+        assert "end_year" not in epoch_columns
+        assert connection.execute(
+            text("select name from epoch where id = 11")
+        ).scalar_one() == "Epoca esistente"
+        assert connection.execute(
+            text("select title from event where id = 12")
+        ).scalar_one() == "Evento esistente"
+        assert connection.exec_driver_sql("pragma foreign_key_check").all() == []
+    engine.dispose()
+
+
+def test_epoch_partial_date_migration_rejects_invalid_legacy_events(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    db_path = tmp_path / "invalid-event-date.sqlite"
+    database_url = f"sqlite:///{db_path}"
+    monkeypatch.setenv("WIKI_PARCHINO_DATABASE_URL", database_url)
+    backend_dir = Path(__file__).resolve().parents[1]
+    config = migration_config(backend_dir)
+    command.upgrade(config, "0006_protected_owner")
+
+    engine = create_engine(database_url)
+    timestamp = "2026-07-30 10:00:00"
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "insert into pullable (id, rarity, created_at, updated_at) values "
+                "(10, 1.0, :time, :time), (11, 1.0, :time, :time), "
+                "(12, 1.0, :time, :time)"
+            ),
+            {"time": timestamp},
+        )
+        connection.execute(
+            text("insert into place (id, name) values (10, 'Luogo')")
+        )
+        connection.execute(
+            text("insert into epoch (id, name) values (11, 'Epoca')")
+        )
+        connection.execute(
+            text(
+                "insert into event "
+                "(id, epoch_id, place_id, title, year, month, day) "
+                "values (12, 11, 10, 'Evento non valido', 2025, 2, 29)"
+            )
+        )
+    engine.dispose()
+
+    with pytest.raises(RuntimeError, match="invalid event IDs: 12"):
+        command.upgrade(config, "head")

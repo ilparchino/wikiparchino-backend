@@ -6,6 +6,7 @@ from typing import Annotated, Literal
 from pydantic import AfterValidator, BaseModel, Field, field_validator, model_validator
 
 from app.models import Connotation, EntityType, Sex
+from app.partial_dates import PartialDate, validate_epoch_range, validate_partial_date
 from app.security import (
     MAX_PASSWORD_LENGTH,
     MIN_PASSWORD_LENGTH,
@@ -219,6 +220,20 @@ class PlaceOut(PlaceBase):
 class EpochBase(RarityMixin):
     name: str = Field(min_length=1, max_length=255)
     description: str | None = None
+    start_year: int | None = Field(default=None, ge=1900)
+    start_month: int | None = Field(default=None, ge=1, le=12)
+    start_day: int | None = Field(default=None, ge=1, le=31)
+    end_year: int | None = Field(default=None, ge=1900)
+    end_month: int | None = Field(default=None, ge=1, le=12)
+    end_day: int | None = Field(default=None, ge=1, le=31)
+
+    @model_validator(mode="after")
+    def validate_partial_dates(self) -> EpochBase:
+        validate_epoch_range(
+            PartialDate(self.start_year, self.start_month, self.start_day),
+            PartialDate(self.end_year, self.end_month, self.end_day),
+        )
+        return self
 
 
 class EpochCreate(EpochBase):
@@ -250,10 +265,10 @@ class EventBase(RarityMixin):
 
     @model_validator(mode="after")
     def validate_partial_date(self) -> EventBase:
-        if self.month is not None and self.year is None:
-            raise ValueError("month requires year")
-        if self.day is not None and self.month is None:
-            raise ValueError("day requires month")
+        validate_partial_date(
+            PartialDate(self.year, self.month, self.day),
+            "La data dell'evento",
+        )
         return self
 
 

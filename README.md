@@ -9,6 +9,7 @@ The backend service for Wiki Parchino. It provides authentication, structured st
 - Administrator-only account management with user creation, reversible deactivation, role changes, password resets, and session revocation.
 - Paginated content, account, and authentication activity with 90-day retention for authentication events.
 - CRUD APIs for people, places, epochs, and events.
+- Gregorian partial dates for events and epoch boundaries, with conservative range validation.
 - Shared pullable identifiers and configurable rarity weights.
 - Person-event and person-place relationships.
 - Authenticated image upload, download, deletion, and batched list previews.
@@ -36,6 +37,7 @@ The backend service for Wiki Parchino. It provides authentication, structured st
 |   |-- database.py      SQLAlchemy engine and session setup
 |   |-- main.py          Application entry point
 |   |-- models.py        Database models
+|   |-- partial_dates.py Shared partial-date validation and comparison semantics
 |   |-- schemas.py       Request and response schemas
 |   |-- security.py      Password and session helpers
 |   |-- security_events.py Security-event recording and retention
@@ -168,7 +170,7 @@ Run `make help` for the complete command list. `make clean` removes reproducible
 
 Relative paths are resolved from the current working directory when supplied through environment variables. Run backend commands from this repository root for predictable results.
 
-All complete timestamps are generated and exchanged in UTC. SQLite stores the normalized UTC clock value without an offset, while the SQLAlchemy UTC type restores timezone information when rows are loaded; API responses therefore include `Z` or `+00:00`. Clients may convert these explicit UTC instants to the user's local timezone for display. Event partial dates are separate calendar values and are not affected by this policy.
+All complete timestamps are generated and exchanged in UTC. SQLite stores the normalized UTC clock value without an offset, while the SQLAlchemy UTC type restores timezone information when rows are loaded; API responses therefore include `Z` or `+00:00`. Clients may convert these explicit UTC instants to the user's local timezone for display. Event dates and epoch boundaries are separate partial Gregorian calendar values and are not affected by this policy.
 
 Keep `WIKI_PARCHINO_ROOT_PATH` empty for direct local access. When a reverse proxy strips a public path prefix before forwarding requests, set it to that exact prefix so FastAPI generates working OpenAPI and OAuth redirect URLs.
 
@@ -187,6 +189,8 @@ All application endpoints are under `/api`:
 - `/media`, `/media/previews`, and `/media/{id}`
 
 Except for health, maintenance status, and login, application endpoints require `Authorization: Bearer <token>`. Login returns the opaque token once; the server stores only its hash. Routes below `/api/admin` additionally require an active account with `is_admin = true`; this is enforced by the backend and does not depend on frontend visibility.
+
+Epochs may define an optional partial start and/or end date. Partial dates support year, year-month, or complete Gregorian precision. Event writes are rejected only when their possible date interval is definitely outside the selected epoch boundary; ambiguous overlaps remain valid. Updating an epoch is rejected when its proposed boundaries would exclude an existing linked event.
 
 Administrators deactivate accounts instead of deleting them. Deactivation immediately revokes all sessions while preserving attribution and activity history; reactivation permits a future login but does not create a session. Content actions remain in `activity_log`. Account and access actions are stored separately in `security_event_log`; authentication events are pruned after 90 days and credential material is never logged. The OpenAPI UI is the authoritative interactive endpoint reference.
 

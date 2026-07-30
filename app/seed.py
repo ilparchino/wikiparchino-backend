@@ -242,6 +242,24 @@ def create_epochs(
     db: Session, actors: list[UserAccount], now: datetime
 ) -> list[Epoch]:
     start = now - timedelta(days=40)
+    date_ranges = (
+        {},
+        {"start_year": 2000},
+        {"end_year": 2030, "end_month": 12},
+        {
+            "start_year": 2000,
+            "start_month": 1,
+            "end_year": 2030,
+            "end_month": 12,
+            "end_day": 31,
+        },
+        {
+            "start_year": 2000,
+            "start_month": 1,
+            "start_day": 1,
+            "end_year": 2030,
+        },
+    )
     epochs: list[Epoch] = []
     for index in range(1, 6):
         actor = actors[(index + 2) % len(actors)]
@@ -255,6 +273,7 @@ def create_epochs(
                 (0.75, 1.0, 1.5, 2.0, 3.0)[index - 1],
                 name=f"Epoca #{index}",
                 description=f"Descrizione generica dell'epoca #{index}.",
+                **date_ranges[index - 1],
             )
         )
     return epochs
@@ -561,6 +580,8 @@ def seed_test_data(db: Session) -> None:
         log_creation=False,
         name="Epoca #1",
         description="Descrizione generica dell'epoca #1.",
+        start_year=2025,
+        end_year=2025,
     )
     event = add_entity(
         db,
