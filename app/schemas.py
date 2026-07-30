@@ -1,12 +1,23 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import AfterValidator, BaseModel, Field, field_validator, model_validator
 
 from app.models import Connotation, EntityType, Sex
-from app.security import MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH
+from app.security import (
+    MAX_PASSWORD_LENGTH,
+    MIN_PASSWORD_LENGTH,
+    validate_new_password,
+)
+
+
+NewPassword = Annotated[
+    str,
+    Field(min_length=MIN_PASSWORD_LENGTH, max_length=MAX_PASSWORD_LENGTH),
+    AfterValidator(validate_new_password),
+]
 
 
 class UserOut(BaseModel):
@@ -14,6 +25,7 @@ class UserOut(BaseModel):
     username: str
     display_name: str
     is_admin: bool
+    is_owner: bool
 
     model_config = {"from_attributes": True}
 
@@ -28,7 +40,7 @@ class AdminUserOut(UserOut):
 class AdminUserCreate(BaseModel):
     username: str = Field(min_length=1, max_length=80)
     display_name: str = Field(min_length=1, max_length=160)
-    password: str = Field(min_length=MIN_PASSWORD_LENGTH, max_length=MAX_PASSWORD_LENGTH)
+    password: NewPassword
     is_admin: bool = False
 
     @field_validator("username")
@@ -63,10 +75,7 @@ class AdminUserUpdate(BaseModel):
 
 
 class AdminPasswordResetIn(BaseModel):
-    new_password: str = Field(
-        min_length=MIN_PASSWORD_LENGTH,
-        max_length=MAX_PASSWORD_LENGTH,
-    )
+    new_password: NewPassword
 
 
 class AdminActivityOut(BaseModel):
@@ -137,10 +146,7 @@ class MaintenanceStatusOut(BaseModel):
 
 class PasswordChangeIn(BaseModel):
     current_password: str = Field(min_length=1, max_length=MAX_PASSWORD_LENGTH)
-    new_password: str = Field(
-        min_length=MIN_PASSWORD_LENGTH,
-        max_length=MAX_PASSWORD_LENGTH,
-    )
+    new_password: NewPassword
 
 
 class ProfileActivityOut(BaseModel):

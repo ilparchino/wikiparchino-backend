@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.database import SessionLocal
 from app.models import UserAccount
-from app.security import MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH, hash_password
+from app.security import hash_password, validate_new_password
 
 
 def required_text(prompt: str, maximum: int, input_fn: Callable[[str], str]) -> str:
@@ -36,15 +36,7 @@ def prompt_password(password_fn: Callable[[str], str]) -> str:
     confirmation = password_fn("Confirm password: ")
     if password != confirmation:
         raise ValueError("Passwords do not match")
-    if len(password) < MIN_PASSWORD_LENGTH:
-        raise ValueError(
-            f"Password must contain at least {MIN_PASSWORD_LENGTH} characters"
-        )
-    if len(password) > MAX_PASSWORD_LENGTH:
-        raise ValueError(
-            f"Password cannot exceed {MAX_PASSWORD_LENGTH} characters"
-        )
-    return password
+    return validate_new_password(password)
 
 
 def prompt_and_save_user(
@@ -69,6 +61,8 @@ def prompt_and_save_user(
 
     password = prompt_password(password_fn)
     is_admin = yes_no("Administrator", existing.is_admin if existing else False, input_fn)
+    if existing is not None and existing.is_owner and not is_admin:
+        raise ValueError("Transfer ownership before removing the Owner's administrator role")
 
     created = existing is None
     user = existing or UserAccount(username=username, display_name=display_name)
@@ -76,6 +70,8 @@ def prompt_and_save_user(
     user.password_hash = hash_password(password)
     user.is_admin = is_admin
     user.is_active = True
+    if created:
+        user.is_owner = False
     db.add(user)
     db.commit()
     db.refresh(user)

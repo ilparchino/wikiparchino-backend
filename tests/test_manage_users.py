@@ -53,6 +53,14 @@ def test_interactive_user_management_creates_and_updates_accounts(client) -> Non
     [
         (["short", "short"], "at least 12"),
         (["a-secure-password", "different-password"], "do not match"),
+        (
+            [" password-sicura", " password-sicura"],
+            "begin or end with whitespace",
+        ),
+        (
+            ["password\tvalida", "password\tvalida"],
+            "printable characters",
+        ),
     ],
 )
 def test_interactive_user_management_rejects_invalid_passwords(
@@ -66,4 +74,16 @@ def test_interactive_user_management_rejects_invalid_passwords(
                 db,
                 input_fn=answers(["invalid-user", "Invalid User"]),
                 password_fn=passwords(password_values),
+            )
+
+
+def test_interactive_user_management_cannot_demote_the_owner(client) -> None:
+    from app.database import SessionLocal
+
+    with SessionLocal() as db:
+        with pytest.raises(ValueError, match="Transfer ownership"):
+            prompt_and_save_user(
+                db,
+                input_fn=answers(["admin", "", "no"]),
+                password_fn=passwords(["owner-password-nuova", "owner-password-nuova"]),
             )

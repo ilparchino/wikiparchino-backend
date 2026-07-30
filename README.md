@@ -82,7 +82,7 @@ Requirements are Python 3.11 or newer and GNU Make.
    make seed
    ```
 
-   The demo contains 8 generic accounts, 24 people, 12 places, 5 epochs, 40 events, relationships, activity history, and generated sample images. The usernames are `admin`, `admin2`, and `utente1` through `utente6`; they all use the development-only password `demo-password-123`. The final account is inactive, while `admin` and `admin2` are administrators.
+   The demo contains 8 generic accounts, 24 people, 12 places, 5 epochs, 40 events, relationships, activity history, and generated sample images. The usernames are `admin`, `admin2`, and `utente1` through `utente6`; they all use the development-only password `demo-password-123`. The final account is inactive, `admin` and `admin2` are administrators, and `admin` is the protected Owner.
 
    The seed intentionally refuses to mix demo records with an existing database or non-empty media directory. To rebuild the disposable local demo, stop the server and run:
 
@@ -98,6 +98,14 @@ Requirements are Python 3.11 or newer and GNU Make.
    ```bash
    make user
    ```
+
+   After creating the intended production administrator, assign or transfer the singular protected Owner role:
+
+   ```bash
+   make owner USERNAME=francesco
+   ```
+
+   The target must already be an active administrator. A transfer keeps the previous Owner active as an ordinary administrator.
 
 6. Verify the installation, then start the development server:
 
@@ -182,6 +190,8 @@ Except for health, maintenance status, and login, application endpoints require 
 
 Administrators deactivate accounts instead of deleting them. Deactivation immediately revokes all sessions while preserving attribution and activity history; reactivation permits a future login but does not create a session. Content actions remain in `activity_log`. Account and access actions are stored separately in `security_event_log`; authentication events are pruned after 90 days and credential material is never logged. The OpenAPI UI is the authoritative interactive endpoint reference.
 
+At most one active administrator can be the protected Owner. Other administrators may inspect that account but cannot change its name, role, status, password, or sessions. Ownership is never assigned through the API or frontend; use `make owner USERNAME=<active-admin>` from the trusted backend host.
+
 ## Maintenance Mode
 
 Maintenance is controlled from the backend command line, not from the administrator API. Scheduling immediately prevents new logins while existing sessions remain usable until the deadline. At the deadline, the first request atomically revokes every session and all routes return `503 Service Unavailable` except `/api/maintenance/status`, `/api/health`, and CORS preflights.
@@ -218,6 +228,7 @@ The suite uses a small isolated seed rather than the larger manual demo dataset.
 The complete Raspberry Pi OS procedure, including systemd, Caddy, DDNS, HTTPS, backups, updates, and verification, is in [DEPLOYMENT_RASPBERRY_PI.md](DEPLOYMENT_RASPBERRY_PI.md).
 
 - Run Alembic migrations before starting a newly deployed version.
+- After applying migration `0006` to an existing installation, run `make owner USERNAME=<active-admin>` while the API is stopped and before restarting it.
 - Store the SQLite database and media directory on persistent storage and back up both together.
 - Serve the API over HTTPS before connecting it to an HTTPS frontend.
 - Restrict the configured CORS origin to the exact deployed frontend origin.
@@ -228,6 +239,7 @@ The complete Raspberry Pi OS procedure, including systemd, Caddy, DDNS, HTTPS, b
 
 - Keep `.env`, SQLite databases, uploaded media, backups, logs, session data, and real credentials out of Git.
 - The seeded accounts and shared demo password are for local development only and must be replaced before deployment.
+- New passwords must contain 12–200 printable characters. Printable Unicode and ordinary internal spaces are accepted; leading/trailing whitespace and control or non-printable characters are rejected without modifying the submitted password.
 - Expose the API only through HTTPS, restrict CORS to the exact frontend origin, keep dependencies updated, and back up the database together with the media directory.
 
 ## License

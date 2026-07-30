@@ -14,6 +14,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -89,6 +90,18 @@ class AttributionMixin(TimestampMixin):
 
 class UserAccount(Base, TimestampMixin):
     __tablename__ = "user_account"
+    __table_args__ = (
+        CheckConstraint(
+            "not is_owner or (is_admin and is_active)",
+            name="ck_user_account_owner_is_active_admin",
+        ),
+        Index(
+            "uq_user_account_single_owner",
+            "is_owner",
+            unique=True,
+            sqlite_where=text("is_owner = 1"),
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     username: Mapped[str] = mapped_column(String(80), unique=True, index=True, nullable=False)
@@ -96,6 +109,7 @@ class UserAccount(Base, TimestampMixin):
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    is_owner: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
 
 class UserSession(Base):

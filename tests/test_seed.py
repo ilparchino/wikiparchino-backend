@@ -47,6 +47,7 @@ def test_rich_demo_seed_is_anonymized_complete_and_consistent(tmp_path: Path) ->
         assert db.query(UserAccount).count() == 8
         assert db.query(UserAccount).filter(UserAccount.is_active.is_(True)).count() == 7
         assert db.query(UserAccount).filter(UserAccount.is_admin.is_(True)).count() == 2
+        assert db.query(UserAccount).filter(UserAccount.is_owner.is_(True)).count() == 1
         assert db.query(UserSession).count() == 0
         assert {user.username for user in db.query(UserAccount).all()} == {
             "admin",
@@ -64,6 +65,10 @@ def test_rich_demo_seed_is_anonymized_complete_and_consistent(tmp_path: Path) ->
         )
         inactive = db.query(UserAccount).filter_by(username="utente6").one()
         assert inactive.is_active is False
+        owner = db.query(UserAccount).filter_by(is_owner=True).one()
+        assert owner.username == "admin"
+        assert owner.is_admin is True
+        assert owner.is_active is True
 
         assert db.query(Person).count() == 24
         assert db.query(Place).count() == 12
@@ -249,6 +254,7 @@ def test_minimal_test_seed_remains_small_and_has_no_history(tmp_path: Path) -> N
         seed_test_data(db)
         admin = db.query(UserAccount).one()
         assert admin.username == "admin"
+        assert admin.is_owner is True
         assert verify_password("admin", admin.password_hash)
         assert db.query(Person).count() == 3
         assert db.query(Place).count() == 2

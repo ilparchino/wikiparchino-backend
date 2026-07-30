@@ -147,6 +147,7 @@ def create_demo_users(db: Session, now: datetime) -> list[UserAccount]:
             password_hash=hash_password(DEMO_PASSWORD),
             is_admin=is_admin,
             is_active=is_active,
+            is_owner=index == 0,
             created_at=created_at,
             updated_at=created_at,
         )
@@ -515,6 +516,7 @@ def seed_test_data(db: Session) -> None:
         display_name="Admin",
         password_hash=hash_password(TEST_PASSWORD),
         is_admin=True,
+        is_owner=True,
         created_at=timestamp,
         updated_at=timestamp,
     )

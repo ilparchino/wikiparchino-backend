@@ -10,7 +10,7 @@ DOTENV = $(PYTHON) -m dotenv -f $(ENV_FILE) run --
 
 .DEFAULT_GOAL := help
 
-.PHONY: help install check-env migrate revision seed user maintenance-schedule maintenance-status maintenance-end maintenance-notify telegram-test dev test run clean
+.PHONY: help install check-env migrate revision seed user owner maintenance-schedule maintenance-status maintenance-end maintenance-notify telegram-test dev test run clean
 
 help:
 	@printf '%s\n' \
@@ -20,6 +20,7 @@ help:
 		'  make revision MESSAGE=""  Generate a migration after model changes' \
 		'  make seed                 Load demo users and content' \
 		'  make user                 Interactively create or update a fixed account' \
+		'  make owner USERNAME=name  Assign or transfer the protected Owner role' \
 		'  make maintenance-schedule MINUTES=15 MESSAGE="..."' \
 		'  make maintenance-status   Show the current maintenance state' \
 		'  make maintenance-end      End or cancel maintenance' \
@@ -58,6 +59,10 @@ seed: migrate
 
 user: migrate
 	$(DOTENV) $(PYTHON) -m app.manage_users
+
+owner: migrate
+	@test -n "$(USERNAME)" || { echo 'Usage: make owner USERNAME=francesco'; exit 1; }
+	$(DOTENV) $(PYTHON) -m app.manage_owner --username "$(USERNAME)"
 
 maintenance-schedule: migrate
 	@test -n "$(MINUTES)" || { echo 'Usage: make maintenance-schedule MINUTES=15 MESSAGE="..."'; exit 1; }

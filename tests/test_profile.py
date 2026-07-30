@@ -78,6 +78,8 @@ def test_profile_returns_the_ten_newest_live_activities(client: httpx.Client) ->
     profile = response.json()
     assert profile["user"]["username"] == "admin"
     assert profile["user"]["display_name"] == "Admin"
+    assert profile["user"]["is_admin"] is True
+    assert profile["user"]["is_owner"] is True
     assert len(profile["recent_activity"]) == 10
     assert profile["recent_activity"][0] == {
         "entity_type": "person",
@@ -158,7 +160,7 @@ def test_password_change_preserves_current_session_and_revokes_others(
         "/api/profile/password",
         json={
             "current_password": "admin",
-            "new_password": "nuova-password-sicura",
+            "new_password": "nuova password café ☕",
         },
         headers=current_headers,
     )
@@ -172,14 +174,14 @@ def test_password_change_preserves_current_session_and_revokes_others(
     ).status_code == 401
     assert client.post(
         "/api/auth/login",
-        json={"username": "admin", "password": "nuova-password-sicura"},
+        json={"username": "admin", "password": "nuova password café ☕"},
     ).status_code == 200
 
     same = client.put(
         "/api/profile/password",
         json={
-            "current_password": "nuova-password-sicura",
-            "new_password": "nuova-password-sicura",
+            "current_password": "nuova password café ☕",
+            "new_password": "nuova password café ☕",
         },
         headers=current_headers,
     )

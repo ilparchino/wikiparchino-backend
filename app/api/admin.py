@@ -36,7 +36,7 @@ from app.schemas import (
     SessionRevocationOut,
     UserOut,
 )
-from app.security import hash_password, utcnow
+from app.security import hash_password, utcnow, verify_password
 from app.security_events import AUTHENTICATION_EVENT_TYPES, log_security_event, request_ip
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -65,6 +65,7 @@ def serialize_admin_user(user: UserAccount, active_sessions: int = 0) -> AdminUs
         username=user.username,
         display_name=user.display_name,
         is_admin=user.is_admin,
+        is_owner=user.is_owner,
         is_active=user.is_active,
         created_at=user.created_at,
         updated_at=user.updated_at,
@@ -162,6 +163,17 @@ def validate_admin_change(
             )
 
 
+def forbid_other_admin_from_managing_owner(
+    actor: UserAccount,
+    target: UserAccount,
+) -> None:
+    if target.is_owner and target.id != actor.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="L'account Proprietario può essere gestito soltanto dal Proprietario",
+        )
+
+
 @router.get("/summary", response_model=AdminSummaryOut)
 def get_summary(
     admin: UserAccount = Depends(current_admin),
@@ -213,6 +225,7 @@ def create_user(
         password_hash=hash_password(payload.password),
         is_active=True,
         is_admin=payload.is_admin,
+        is_owner=False,
         created_at=timestamp,
         updated_at=timestamp,
     )
@@ -269,6 +282,7 @@ def update_user(
     db: Session = Depends(get_db),
 ) -> AdminUserOut:
     target = user_or_404(db, user_id)
+    forbid_other_admin_from_managing_owner(admin, target)
     validate_admin_change(db, admin, target, payload)
     timestamp = utcnow()
     changed = False
@@ -332,10 +346,16 @@ def reset_password(
     db: Session = Depends(get_db),
 ) -> Response:
     target = user_or_404(db, user_id)
+    forbid_other_admin_from_managing_owner(admin, target)
     if target.id == admin.id:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Cambia la tua password dalla pagina profilo",
+        )
+    if verify_password(payload.new_password, target.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="La nuova password deve essere diversa da quella attuale",
         )
     timestamp = utcnow()
     target.password_hash = hash_password(payload.new_password)
@@ -362,6 +382,7 @@ def revoke_sessions(
     db: Session = Depends(get_db),
 ) -> SessionRevocationOut:
     target = user_or_404(db, user_id)
+    forbid_other_admin_from_managing_owner(admin, target)
     query = db.query(UserSession).filter(UserSession.user_id == target.id)
     if target.id == admin.id:
         query = query.filter(UserSession.id != session.id)

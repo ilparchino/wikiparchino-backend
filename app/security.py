@@ -13,6 +13,22 @@ MIN_PASSWORD_LENGTH = 12
 MAX_PASSWORD_LENGTH = 200
 
 
+def validate_new_password(password: str) -> str:
+    if len(password) < MIN_PASSWORD_LENGTH:
+        raise ValueError(
+            f"Password must contain at least {MIN_PASSWORD_LENGTH} characters"
+        )
+    if len(password) > MAX_PASSWORD_LENGTH:
+        raise ValueError(
+            f"Password cannot exceed {MAX_PASSWORD_LENGTH} characters"
+        )
+    if password[0].isspace() or password[-1].isspace():
+        raise ValueError("Password cannot begin or end with whitespace")
+    if not password.isprintable():
+        raise ValueError("Password can contain only printable characters")
+    return password
+
+
 def hash_password(password: str, *, salt: bytes | None = None) -> str:
     salt = salt or os.urandom(16)
     digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, PBKDF2_ITERATIONS)

@@ -106,6 +106,7 @@ def test_bearer_validation_expiry_and_inactive_accounts(client: httpx.Client) ->
     ).json()
     with SessionLocal() as db:
         user = db.query(UserAccount).filter(UserAccount.username == "admin").one()
+        user.is_owner = False
         user.is_active = False
         db.commit()
 

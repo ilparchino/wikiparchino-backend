@@ -312,3 +312,82 @@ def test_maintenance_migration_preserves_existing_data_and_downgrades(
             text("select username from user_account where id = 1")
         ).scalar_one() == "existing"
     engine.dispose()
+
+
+def test_owner_migration_preserves_users_and_enforces_invariants(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    db_path = tmp_path / "owner-migration.sqlite"
+    database_url = f"sqlite:///{db_path}"
+    monkeypatch.setenv("WIKI_PARCHINO_DATABASE_URL", database_url)
+    backend_dir = Path(__file__).resolve().parents[1]
+    config = migration_config(backend_dir)
+    command.upgrade(config, "0005_maintenance_mode")
+
+    engine = create_engine(database_url)
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "insert into user_account "
+                "(id, username, display_name, password_hash, is_active, is_admin, "
+                "created_at, updated_at) values "
+                "(1, 'admin1', 'Admin 1', 'hash', 1, 1, "
+                "'2026-07-30 10:00:00', '2026-07-30 10:00:00'), "
+                "(2, 'admin2', 'Admin 2', 'hash', 1, 1, "
+                "'2026-07-30 10:00:00', '2026-07-30 10:00:00'), "
+                "(3, 'regular', 'Regular', 'hash', 1, 0, "
+                "'2026-07-30 10:00:00', '2026-07-30 10:00:00'), "
+                "(4, 'inactive', 'Inactive', 'hash', 0, 1, "
+                "'2026-07-30 10:00:00', '2026-07-30 10:00:00')"
+            )
+        )
+    engine.dispose()
+
+    command.upgrade(config, "head")
+    engine = create_engine(database_url)
+    with engine.connect() as connection:
+        rows = connection.execute(
+            text("select username, is_owner from user_account order by id")
+        ).all()
+        assert rows == [
+            ("admin1", 0),
+            ("admin2", 0),
+            ("regular", 0),
+            ("inactive", 0),
+        ]
+        table_sql = connection.execute(
+            text(
+                "select sql from sqlite_master "
+                "where type = 'table' and name = 'user_account'"
+            )
+        ).scalar_one()
+        assert "ck_user_account_owner_is_active_admin" in table_sql
+        indexes = {
+            row["name"]
+            for row in connection.execute(text("pragma index_list(user_account)")).mappings()
+        }
+        assert "uq_user_account_single_owner" in indexes
+
+    with engine.begin() as connection:
+        connection.execute(text("update user_account set is_owner = 1 where id = 1"))
+        with pytest.raises(IntegrityError):
+            connection.execute(text("update user_account set is_owner = 1 where id = 2"))
+    with engine.begin() as connection:
+        with pytest.raises(IntegrityError):
+            connection.execute(text("update user_account set is_owner = 1 where id = 3"))
+    with engine.begin() as connection:
+        with pytest.raises(IntegrityError):
+            connection.execute(text("update user_account set is_owner = 1 where id = 4"))
+    engine.dispose()
+
+    command.downgrade(config, "0005_maintenance_mode")
+    engine = create_engine(database_url)
+    with engine.connect() as connection:
+        columns = {
+            row["name"]
+            for row in connection.execute(text("pragma table_info(user_account)")).mappings()
+        }
+        assert "is_owner" not in columns
+        assert connection.execute(text("select count(*) from user_account")).scalar_one() == 4
+    engine.dispose()
