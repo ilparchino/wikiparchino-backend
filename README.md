@@ -227,17 +227,13 @@ make test
 
 The suite uses a small isolated seed rather than the larger manual demo dataset. It covers authentication and session reuse, maintenance enforcement and Telegram delivery failures, administrator authorization and account safeguards, account deactivation, activity/security history, profile activity, password changes, CRUD, database constraints, hard-delete behavior, relationships, media previews and storage, search, pulls, demo seeding, and fresh Alembic migrations.
 
-## Deployment Notes
+## Deployment
 
-The complete Raspberry Pi OS procedure, including systemd, Caddy, DDNS, HTTPS, backups, updates, and verification, is in [DEPLOYMENT_RASPBERRY_PI.md](DEPLOYMENT_RASPBERRY_PI.md).
+Production deployments should use persistent database and media paths outside the source checkout, load secrets from a protected environment file, and expose the application through an HTTPS reverse proxy. Restrict CORS to the exact frontend origins and never expose the development server directly to the internet.
 
-- Run Alembic migrations before starting a newly deployed version.
-- After applying migration `0006` to an existing installation, run `make owner USERNAME=<active-admin>` while the API is stopped and before restarting it.
-- Store the SQLite database and media directory on persistent storage and back up both together.
-- Serve the API over HTTPS before connecting it to an HTTPS frontend.
-- Restrict the configured CORS origin to the exact deployed frontend origin.
-- Create production accounts with `make user`; do not deploy the demo password or expose the development server directly to the internet.
-- AGPLv3 network deployments must offer users the corresponding source code of the deployed version.
+Apply pending schema revisions with `make migrate` before starting a new backend version. Create production accounts with `make user`, assign the protected Owner through `make owner USERNAME=<active-admin>`, and never use the demo seed in production.
+
+Back up SQLite and the media directory together before updates. For disruptive operations, use the maintenance commands to prevent new logins, notify active users, and block access while the deployment is in progress. Network deployments must provide the corresponding source code as required by AGPLv3.
 
 ## Security guidelines
 
