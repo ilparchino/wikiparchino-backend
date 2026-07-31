@@ -3,6 +3,7 @@ PYTHON ?= $(VENV)/bin/python
 ENV_FILE ?= $(CURDIR)/.env
 HOST ?= 127.0.0.1
 PORT ?= 8000
+API_DELAY_MS ?= 0
 
 export PATH := $(VENV)/bin:$(PATH)
 
@@ -27,11 +28,12 @@ help:
 		'  make maintenance-notify   Retry the latest pending notification' \
 		'  make telegram-test        Send a Telegram configuration test' \
 		'  make dev                  Start the development API server' \
+		'  make API_DELAY_MS=1500 dev  Start with artificial API latency' \
 		'  make test                 Run the complete backend test suite' \
 		'  make run CMD="<command>"  Run any command with variables from .env' \
 		'  make clean                Remove reproducible caches and build output' \
 		'' \
-		'Overrides: ENV_FILE=<path> HOST=<host> PORT=<port>'
+		'Overrides: ENV_FILE=<path> HOST=<host> PORT=<port> API_DELAY_MS=<0-60000>'
 
 $(PYTHON):
 	python3 -m venv $(VENV)
@@ -81,7 +83,7 @@ telegram-test: check-env
 	$(DOTENV) $(PYTHON) -m app.manage_maintenance telegram-test
 
 dev: check-env
-	$(DOTENV) $(PYTHON) -m uvicorn app.main:app --reload --host $(HOST) --port $(PORT)
+	WIKI_PARCHINO_DEVELOPMENT_API_DELAY_MS="$(API_DELAY_MS)" $(DOTENV) $(PYTHON) -m uvicorn app.main:app --reload --host $(HOST) --port $(PORT)
 
 test: check-env
 	$(DOTENV) $(PYTHON) -m pytest

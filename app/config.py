@@ -15,6 +15,7 @@ class Settings:
     session_days: int
     media_dir: Path
     root_path: str
+    development_api_delay_ms: int
     telegram_bot_token: str | None = field(repr=False)
     telegram_chat_id: str | None
 
@@ -48,6 +49,17 @@ def env_optional(name: str) -> str | None:
     return value or None
 
 
+def env_bounded_int(name: str, default: int, minimum: int, maximum: int) -> int:
+    raw_value = os.getenv(name, str(default))
+    try:
+        value = int(raw_value)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be an integer") from exc
+    if value < minimum or value > maximum:
+        raise ValueError(f"{name} must be between {minimum} and {maximum}")
+    return value
+
+
 def get_settings() -> Settings:
     frontend_origins = env_origins(
         "WIKI_PARCHINO_FRONTEND_ORIGINS", "http://127.0.0.1:5173"
@@ -64,6 +76,9 @@ def get_settings() -> Settings:
         session_days=int(os.getenv("WIKI_PARCHINO_SESSION_DAYS", "14")),
         media_dir=env_path("WIKI_PARCHINO_MEDIA_DIR", BACKEND_DIR / "media"),
         root_path=env_root_path("WIKI_PARCHINO_ROOT_PATH"),
+        development_api_delay_ms=env_bounded_int(
+            "WIKI_PARCHINO_DEVELOPMENT_API_DELAY_MS", 0, 0, 60_000
+        ),
         telegram_bot_token=env_optional("WIKI_PARCHINO_TELEGRAM_BOT_TOKEN"),
         telegram_chat_id=env_optional("WIKI_PARCHINO_TELEGRAM_CHAT_ID"),
     )

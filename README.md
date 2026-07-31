@@ -84,7 +84,7 @@ Requirements are Python 3.11 or newer and GNU Make.
    make seed
    ```
 
-   The demo contains 8 generic accounts, 24 people, 12 places, 5 epochs, 40 events, 6 social groups, relationships, activity history, and generated sample images. The usernames are `admin`, `admin2`, and `utente1` through `utente6`; they all use the development-only password `demo-password-123`. The final account is inactive, `admin` and `admin2` are administrators, and `admin` is the protected Owner.
+   The demo contains 8 generic accounts, 24 people, 12 places, 5 epochs, 40 events, 6 social groups, relationships, activity history, and generated sample images. Descriptions deliberately range from missing or very short text to multi-thousand-character content so compact cards and detail views can be exercised. The usernames are `admin`, `admin2`, and `utente1` through `utente6`; they all use the development-only password `demo-password-123`. The final account is inactive, `admin` and `admin2` are administrators, and `admin` is the protected Owner.
 
    The seed intentionally refuses to mix demo records with an existing database or non-empty media directory. To rebuild the disposable local demo, stop the server and run:
 
@@ -126,6 +126,18 @@ After switching branches or pulling changes:
 2. Run `make migrate` before starting the server. Alembic applies only pending revisions, so this is safe when the database is already current.
 3. Run `make test` to catch API, schema, and migration regressions.
 4. Run `make dev` to start Uvicorn with automatic reload.
+
+To inspect frontend loading states against a deliberately slow local API, add a
+fixed delay in milliseconds to every API request except health checks and CORS
+preflights:
+
+```bash
+make API_DELAY_MS=1500 dev
+```
+
+The delay is disabled by default, is accepted only from `0` through `60000`,
+and is passed only by the development target. It does not affect migrations,
+tests, CLI commands, or the production service configuration.
 
 You do not need to migrate after ordinary Python changes when no Alembic revision was added, but running `make migrate` remains harmless. Never update the schema manually or use SQLAlchemy `create_all()` as a substitute for migrations.
 

@@ -17,6 +17,7 @@ from app.api import (
 )
 from app.api.deps import current_user
 from app.config import get_settings
+from app.development_delay_middleware import DevelopmentDelayMiddleware
 from app.maintenance_middleware import MaintenanceMiddleware
 from app.models import UserAccount
 from app.schemas import UserOut
@@ -30,6 +31,10 @@ def create_app() -> FastAPI:
         root_path=settings.root_path,
     )
     app.add_middleware(MaintenanceMiddleware)
+    app.add_middleware(
+        DevelopmentDelayMiddleware,
+        delay_ms=settings.development_api_delay_ms,
+    )
     app.add_middleware(
         CORSMiddleware,
         allow_origins=list(settings.frontend_origins),

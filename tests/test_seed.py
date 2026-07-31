@@ -144,6 +144,22 @@ def test_rich_demo_seed_is_anonymized_complete_and_consistent(tmp_path: Path) ->
         assert db.query(Person).filter(Person.surname.is_(None)).count() > 0
         assert db.query(Person).filter(Person.description.is_(None)).count() > 0
 
+        for model in (Person, Place, Epoch, Event, SocialGroup):
+            descriptions = [
+                description
+                for (description,) in db.query(model.description).all()
+                if description is not None
+            ]
+            lengths = {len(description) for description in descriptions}
+            assert min(lengths) < 20
+            assert max(lengths) > 2_000
+            assert len(lengths) >= 5
+        assert any(
+            description is None
+            for model in (Person, Place, Event, SocialGroup)
+            for (description,) in db.query(model.description).all()
+        )
+
         events = db.query(Event).all()
         assert all(
             event_epoch_conflict(

@@ -45,6 +45,24 @@ class SeedDataError(RuntimeError):
     pass
 
 
+def varied_demo_description(
+    label: str,
+    subject: str,
+    index: int,
+) -> str | None:
+    variant = (index - 1) % 7
+    if variant == 6:
+        return None
+    if variant == 0:
+        return f"{label} #{index}."
+
+    repetitions = (0, 1, 3, 8, 24, 70)[variant]
+    return " ".join(
+        f"Dettaglio generico #{part} {subject} #{index}, usato per verificare la resa di descrizioni con lunghezze differenti."
+        for part in range(1, repetitions + 1)
+    )
+
+
 def add_activity(
     db: Session,
     actor: UserAccount,
@@ -204,10 +222,10 @@ def create_people(
                 surname=None if index % 4 == 0 else f"Cognome #{index}",
                 sex=sexes[(index - 1) % len(sexes)].value,
                 connotation=connotations[(index - 1) % len(connotations)].value,
-                description=(
-                    None
-                    if index % 6 == 0
-                    else f"Descrizione generica della persona #{index}. Categoria di prova #{(index % 4) + 1}."
+                description=varied_demo_description(
+                    "Persona",
+                    "della persona",
+                    index,
                 ),
             )
         )
@@ -236,10 +254,10 @@ def create_places(
                     if index % 3 == 0
                     else f"Via Dimostrativa #{index}, 100{index:02d} Città #{(index % 4) + 1}"
                 ),
-                description=(
-                    None
-                    if index % 5 == 0
-                    else f"Descrizione generica del luogo #{index}. Area di prova #{(index % 3) + 1}."
+                description=varied_demo_description(
+                    "Luogo",
+                    "del luogo",
+                    index,
                 ),
             )
         )
@@ -280,7 +298,11 @@ def create_epochs(
                 start + timedelta(hours=index),
                 (0.75, 1.0, 1.5, 2.0, 3.0)[index - 1],
                 name=f"Epoca #{index}",
-                description=f"Descrizione generica dell'epoca #{index}.",
+                description=varied_demo_description(
+                    "Epoca",
+                    "dell'epoca",
+                    index,
+                ),
                 **date_ranges[index - 1],
             )
         )
@@ -323,10 +345,10 @@ def create_events(
                 epoch_id=epochs[(index - 1) % len(epochs)].id,
                 place_id=places[(index - 1) % len(places)].id,
                 title=f"Evento #{index}",
-                description=(
-                    None
-                    if index % 7 == 0
-                    else f"Descrizione generica dell'evento #{index}. Scenario di prova #{(index % 5) + 1}."
+                description=varied_demo_description(
+                    "Evento",
+                    "dell'evento",
+                    index,
                 ),
                 year=year,
                 month=month,
@@ -354,8 +376,12 @@ def create_groups(
                 name=f"Cerchia #{index}",
                 description=(
                     None
-                    if index in {4, 6}
-                    else f"Descrizione generica della cerchia #{index}."
+                    if index == 4
+                    else varied_demo_description(
+                        "Cerchia",
+                        "della cerchia",
+                        index,
+                    )
                 ),
             )
         )
