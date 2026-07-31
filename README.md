@@ -8,10 +8,10 @@ The backend service for Wiki Parchino. It provides authentication, structured st
 - Self-service password changes that preserve the current session and revoke other sessions.
 - Administrator-only account management with user creation, reversible deactivation, role changes, password resets, and session revocation.
 - Paginated content, account, and authentication activity with 90-day retention for authentication events.
-- CRUD APIs for people, places, epochs, and events.
+- CRUD APIs for people, places, epochs, events, and pullable social groups.
 - Gregorian partial dates for events and epoch boundaries, with conservative range validation.
 - Shared pullable identifiers and configurable rarity weights.
-- Person-event and person-place relationships.
+- Person-event, person-place, group-person, and group-epoch relationships.
 - Authenticated image upload, download, deletion, and batched list previews.
 - Cross-entity search, random pulls, and deterministic daily pulls.
 - Hard deletion with database cascades and protected place/epoch references.
@@ -84,7 +84,7 @@ Requirements are Python 3.11 or newer and GNU Make.
    make seed
    ```
 
-   The demo contains 8 generic accounts, 24 people, 12 places, 5 epochs, 40 events, relationships, activity history, and generated sample images. The usernames are `admin`, `admin2`, and `utente1` through `utente6`; they all use the development-only password `demo-password-123`. The final account is inactive, `admin` and `admin2` are administrators, and `admin` is the protected Owner.
+   The demo contains 8 generic accounts, 24 people, 12 places, 5 epochs, 40 events, 6 social groups, relationships, activity history, and generated sample images. The usernames are `admin`, `admin2`, and `utente1` through `utente6`; they all use the development-only password `demo-password-123`. The final account is inactive, `admin` and `admin2` are administrators, and `admin` is the protected Owner.
 
    The seed intentionally refuses to mix demo records with an existing database or non-empty media directory. To rebuild the disposable local demo, stop the server and run:
 
@@ -182,8 +182,8 @@ All application endpoints are under `/api`:
 - `/maintenance/status` (public and non-cacheable)
 - `/profile` and `/profile/password`
 - `/admin/summary`, `/admin/users`, and `/admin/activity` (administrators only)
-- `/people`, `/places`, `/epochs`, and `/events`
-- relationship endpoints nested under people, places, epochs, and events
+- `/people`, `/places`, `/epochs`, `/events`, and `/groups`
+- relationship endpoints nested under people, places, epochs, events, and groups
 - `/search`
 - `/pulls/random` and `/pulls/daily`
 - `/media`, `/media/previews`, and `/media/{id}`
@@ -191,6 +191,8 @@ All application endpoints are under `/api`:
 Except for health, maintenance status, and login, application endpoints require `Authorization: Bearer <token>`. Login returns the opaque token once; the server stores only its hash. Routes below `/api/admin` additionally require an active account with `is_admin = true`; this is enforced by the backend and does not depend on frontend visibility.
 
 Epochs may define an optional partial start and/or end date. Partial dates support year, year-month, or complete Gregorian precision. Event writes are rejected only when their possible date interval is definitely outside the selected epoch boundary; ambiguous overlaps remain valid. Updating an epoch is rejected when its proposed boundaries would exclude an existing linked event.
+
+Groups represent Italian UI "Cerchie" and are regular pullable entities with rarity, media, search, and activity history. Group membership with people and epochs is many-to-many. Membership sets are replaced independently through the group relationship endpoints; reciprocal person and epoch routes are read-only.
 
 Administrators deactivate accounts instead of deleting them. Deactivation immediately revokes all sessions while preserving attribution and activity history; reactivation permits a future login but does not create a session. Content actions remain in `activity_log`. Account and access actions are stored separately in `security_event_log`; authentication events are pruned after 90 days and credential material is never logged. The OpenAPI UI is the authoritative interactive endpoint reference.
 

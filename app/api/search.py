@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import current_user
 from app.database import get_db
-from app.models import EntityType, Epoch, Event, Person, Place, UserAccount
+from app.models import EntityType, Epoch, Event, Person, Place, SocialGroup, UserAccount
 from app.schemas import SearchResult
 
 router = APIRouter(tags=["search"])
@@ -30,9 +30,25 @@ def search(
     ):
         results.append(SearchResult(entity_type=EntityType.PERSON, id=person.id, title=person.alias, subtitle=person.description))
     for place in (
-        db.query(Place).filter(or_(Place.name.ilike(term), Place.description.ilike(term))).limit(20).all()
+        db.query(Place)
+        .filter(
+            or_(
+                Place.name.ilike(term),
+                Place.address.ilike(term),
+                Place.description.ilike(term),
+            )
+        )
+        .limit(20)
+        .all()
     ):
-        results.append(SearchResult(entity_type=EntityType.PLACE, id=place.id, title=place.name, subtitle=place.description))
+        results.append(
+            SearchResult(
+                entity_type=EntityType.PLACE,
+                id=place.id,
+                title=place.name,
+                subtitle=place.address or place.description,
+            )
+        )
     for epoch in (
         db.query(Epoch).filter(or_(Epoch.name.ilike(term), Epoch.description.ilike(term))).limit(20).all()
     ):
@@ -41,4 +57,18 @@ def search(
         db.query(Event).filter(or_(Event.title.ilike(term), Event.description.ilike(term))).limit(20).all()
     ):
         results.append(SearchResult(entity_type=EntityType.EVENT, id=event.id, title=event.title, subtitle=event.description))
+    for group in (
+        db.query(SocialGroup)
+        .filter(or_(SocialGroup.name.ilike(term), SocialGroup.description.ilike(term)))
+        .limit(20)
+        .all()
+    ):
+        results.append(
+            SearchResult(
+                entity_type=EntityType.GROUP,
+                id=group.id,
+                title=group.name,
+                subtitle=group.description,
+            )
+        )
     return results[:50]

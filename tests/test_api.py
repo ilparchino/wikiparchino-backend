@@ -48,6 +48,189 @@ def test_crud_hard_delete_and_search(auth_client: httpx.Client) -> None:
     assert auth_client.get(f"/api/people/{person_id}").status_code == 404
 
 
+def test_place_address_normalization_validation_and_search(
+    auth_client: httpx.Client,
+) -> None:
+    created = auth_client.post(
+        "/api/places",
+        json={
+            "name": "Luogo con indirizzo",
+            "address": "  Via del Caffè 10, Città  ",
+            "description": "Descrizione non usata come sottotitolo",
+            "rarity": 1.0,
+        },
+    )
+    assert created.status_code == 201
+    place = created.json()
+    assert place["address"] == "Via del Caffè 10, Città"
+
+    found = auth_client.get("/api/search", params={"q": "Caffè"})
+    assert found.status_code == 200
+    result = next(item for item in found.json() if item["id"] == place["id"])
+    assert result["entity_type"] == "place"
+    assert result["subtitle"] == "Via del Caffè 10, Città"
+
+    max_length = auth_client.put(
+        f"/api/places/{place['id']}",
+        json={
+            "name": place["name"],
+            "address": f"  {'x' * 500}  ",
+            "description": place["description"],
+            "rarity": place["rarity"],
+        },
+    )
+    assert max_length.status_code == 200
+    assert max_length.json()["address"] == "x" * 500
+
+    too_long = auth_client.put(
+        f"/api/places/{place['id']}",
+        json={
+            "name": place["name"],
+            "address": "x" * 501,
+            "description": place["description"],
+            "rarity": place["rarity"],
+        },
+    )
+    assert too_long.status_code == 422
+
+    for invalid in ("Via uno\nVia due", "Via\tTab", "Via\x00Null"):
+        rejected = auth_client.put(
+            f"/api/places/{place['id']}",
+            json={
+                "name": place["name"],
+                "address": invalid,
+                "description": place["description"],
+                "rarity": place["rarity"],
+            },
+        )
+        assert rejected.status_code == 422
+
+    cleared = auth_client.put(
+        f"/api/places/{place['id']}",
+        json={
+            "name": place["name"],
+            "address": "   ",
+            "description": place["description"],
+            "rarity": place["rarity"],
+        },
+    )
+    assert cleared.status_code == 200
+    assert cleared.json()["address"] is None
+
+
+def test_group_crud_relationships_search_pulls_and_activity(
+    auth_client: httpx.Client,
+) -> None:
+    seeded = auth_client.get("/api/groups")
+    assert seeded.status_code == 200
+    assert [(item["people_count"], item["epoch_count"]) for item in seeded.json()] == [
+        (1, 1),
+        (0, 0),
+    ]
+
+    created = auth_client.post(
+        "/api/groups",
+        json={
+            "name": "Cerchia di verifica",
+            "description": "Descrizione ricercabile della cerchia",
+            "rarity": 2.5,
+        },
+    )
+    assert created.status_code == 201
+    group = created.json()
+    group_id = group["id"]
+    assert group["rarity"] == 2.5
+    assert group["created_at"] == group["updated_at"]
+
+    search = auth_client.get("/api/search", params={"q": "ricercabile"})
+    assert search.status_code == 200
+    assert any(
+        item["entity_type"] == "group" and item["id"] == group_id
+        for item in search.json()
+    )
+    pull = auth_client.get("/api/pulls/random", params={"entity_type": "group"})
+    assert pull.status_code == 200
+    assert pull.json()["entity_type"] == "group"
+
+    people = auth_client.get("/api/people").json()
+    epochs = auth_client.get("/api/epochs").json()
+    person_ids = [people[0]["id"], people[1]["id"]]
+    epoch_ids = [epochs[0]["id"]]
+    person_updated_at = people[0]["updated_at"]
+    epoch_updated_at = epochs[0]["updated_at"]
+
+    replaced_people = auth_client.put(
+        f"/api/groups/{group_id}/people",
+        json={"person_ids": person_ids},
+    )
+    assert replaced_people.status_code == 200
+    assert [person["id"] for person in replaced_people.json()] == person_ids
+    replaced_epochs = auth_client.put(
+        f"/api/groups/{group_id}/epochs",
+        json={"epoch_ids": epoch_ids},
+    )
+    assert replaced_epochs.status_code == 200
+    assert [epoch["id"] for epoch in replaced_epochs.json()] == epoch_ids
+
+    duplicate = auth_client.put(
+        f"/api/groups/{group_id}/people",
+        json={"person_ids": [person_ids[0], person_ids[0]]},
+    )
+    assert duplicate.status_code == 422
+    missing = auth_client.put(
+        f"/api/groups/{group_id}/epochs",
+        json={"epoch_ids": [999999]},
+    )
+    assert missing.status_code == 422
+    assert [person["id"] for person in auth_client.get(f"/api/groups/{group_id}/people").json()] == person_ids
+    assert [epoch["id"] for epoch in auth_client.get(f"/api/groups/{group_id}/epochs").json()] == epoch_ids
+
+    reciprocal_people = auth_client.get(f"/api/people/{person_ids[0]}/groups")
+    reciprocal_epochs = auth_client.get(f"/api/epochs/{epoch_ids[0]}/groups")
+    assert any(item["id"] == group_id for item in reciprocal_people.json())
+    assert any(item["id"] == group_id for item in reciprocal_epochs.json())
+    assert auth_client.get(f"/api/people/{person_ids[0]}").json()["updated_at"] == person_updated_at
+    assert auth_client.get(f"/api/epochs/{epoch_ids[0]}").json()["updated_at"] == epoch_updated_at
+
+    from app.database import SessionLocal
+    from app.models import ActivityAction, ActivityLog, Pullable, SocialGroupEpoch, SocialGroupPerson
+
+    with SessionLocal() as db:
+        assert db.get(Pullable, group_id) is not None
+        people_log = (
+            db.query(ActivityLog)
+            .filter_by(
+                entity_id=group_id,
+                action=ActivityAction.REPLACE_GROUP_PEOPLE.value,
+            )
+            .one()
+        )
+        epoch_log = (
+            db.query(ActivityLog)
+            .filter_by(
+                entity_id=group_id,
+                action=ActivityAction.REPLACE_GROUP_EPOCHS.value,
+            )
+            .one()
+        )
+        assert all(
+            link.created_at == link.updated_at == people_log.occurred_at
+            for link in db.query(SocialGroupPerson).filter_by(group_id=group_id)
+        )
+        assert all(
+            link.created_at == link.updated_at == epoch_log.occurred_at
+            for link in db.query(SocialGroupEpoch).filter_by(group_id=group_id)
+        )
+
+    deleted = auth_client.delete(f"/api/groups/{group_id}")
+    assert deleted.status_code == 204
+    assert auth_client.get(f"/api/groups/{group_id}").status_code == 404
+    with SessionLocal() as db:
+        assert db.get(Pullable, group_id) is None
+        assert db.query(SocialGroupPerson).filter_by(group_id=group_id).count() == 0
+        assert db.query(SocialGroupEpoch).filter_by(group_id=group_id).count() == 0
+
+
 def test_entity_metadata_is_flattened_from_pullable_and_touched_on_update(
     auth_client: httpx.Client,
 ) -> None:

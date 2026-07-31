@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
+from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
 from app.api.deps import current_user
@@ -15,7 +16,19 @@ from app.api.utils import (
 )
 from app.database import get_db
 from app.media_storage import commit_staged_deletion
-from app.models import ActivityAction, EntityType, Epoch, Event, Person, Place, UserAccount, utcnow
+from app.models import (
+    ActivityAction,
+    EntityType,
+    Epoch,
+    Event,
+    Person,
+    Place,
+    SocialGroup,
+    SocialGroupEpoch,
+    SocialGroupPerson,
+    UserAccount,
+    utcnow,
+)
 from app.partial_dates import PartialDate, event_epoch_conflict
 from app.schemas import (
     EpochCreate,
@@ -24,6 +37,10 @@ from app.schemas import (
     EventCreate,
     EventOut,
     EventUpdate,
+    GroupCreate,
+    GroupOut,
+    GroupSummaryOut,
+    GroupUpdate,
     PersonCreate,
     PersonOut,
     PersonUpdate,
@@ -299,4 +316,119 @@ def delete_event(event_id: int, user: UserAccount = Depends(current_user), db: S
     item = active_or_404(db, Event, event_id)
     log_activity(db, user, EntityType.EVENT, event_id, ActivityAction.DELETE, utcnow(), {"title": item.title})
     staged_deletion = delete_pullable(db, event_id)
+    commit_staged_deletion(db, staged_deletion)
+
+
+@router.get("/groups", response_model=list[GroupSummaryOut])
+def list_groups(
+    user: UserAccount = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> list[GroupSummaryOut]:
+    rows = (
+        db.query(
+            SocialGroup,
+            func.count(func.distinct(SocialGroupPerson.person_id)),
+            func.count(func.distinct(SocialGroupEpoch.epoch_id)),
+        )
+        .outerjoin(SocialGroupPerson, SocialGroupPerson.group_id == SocialGroup.id)
+        .outerjoin(SocialGroupEpoch, SocialGroupEpoch.group_id == SocialGroup.id)
+        .options(joinedload(SocialGroup.pullable))
+        .group_by(SocialGroup.id)
+        .order_by(SocialGroup.name)
+        .all()
+    )
+    return [
+        GroupSummaryOut(
+            **GroupOut.model_validate(group).model_dump(),
+            people_count=people_count,
+            epoch_count=epoch_count,
+        )
+        for group, people_count, epoch_count in rows
+    ]
+
+
+@router.post("/groups", response_model=GroupOut, status_code=status.HTTP_201_CREATED)
+def create_group(
+    payload: GroupCreate,
+    user: UserAccount = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> SocialGroup:
+    data, rarity = split_rarity(payload)
+    timestamp = utcnow()
+    pullable = create_pullable(db, rarity, user.id, timestamp)
+    item = SocialGroup(id=pullable.id, **data)
+    db.add(item)
+    log_activity(
+        db,
+        user,
+        EntityType.GROUP,
+        item.id,
+        ActivityAction.CREATE,
+        timestamp,
+        payload.model_dump(),
+    )
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+@router.get("/groups/{group_id}", response_model=GroupOut)
+def get_group(
+    group_id: int,
+    user: UserAccount = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> SocialGroup:
+    return active_or_404(db, SocialGroup, group_id)
+
+
+@router.put("/groups/{group_id}", response_model=GroupOut)
+def update_group(
+    group_id: int,
+    payload: GroupUpdate,
+    user: UserAccount = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> SocialGroup:
+    item = active_or_404(db, SocialGroup, group_id)
+    data, rarity = split_rarity(payload)
+    for key, value in data.items():
+        setattr(item, key, value)
+    update_rarity(item, rarity)
+    timestamp = utcnow()
+    touch_pullable(item.pullable, user.id, timestamp)
+    log_activity(
+        db,
+        user,
+        EntityType.GROUP,
+        item.id,
+        ActivityAction.UPDATE,
+        timestamp,
+        payload.model_dump(),
+    )
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+@router.delete(
+    "/groups/{group_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+    response_model=None,
+)
+def delete_group(
+    group_id: int,
+    user: UserAccount = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> None:
+    item = active_or_404(db, SocialGroup, group_id)
+    log_activity(
+        db,
+        user,
+        EntityType.GROUP,
+        group_id,
+        ActivityAction.DELETE,
+        utcnow(),
+        {"title": item.name},
+    )
+    staged_deletion = delete_pullable(db, group_id)
     commit_staged_deletion(db, staged_deletion)

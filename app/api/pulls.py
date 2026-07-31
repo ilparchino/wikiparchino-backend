@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import current_user
 from app.database import get_db
-from app.models import EntityType, Epoch, Event, Person, Place, Pullable, UserAccount
+from app.models import EntityType, Epoch, Event, Person, Place, Pullable, SocialGroup, UserAccount
 from app.schemas import PullResult
 
 router = APIRouter(prefix="/pulls", tags=["pulls"])
@@ -47,12 +47,19 @@ def candidate_select(entity_type: EntityType) -> Select:
             Epoch.name.label("title"),
             Pullable.rarity.label("rarity"),
         ).join(Pullable, Pullable.id == Epoch.id)
+    if entity_type == EntityType.EVENT:
+        return select(
+            literal(EntityType.EVENT.value).label("entity_type"),
+            Event.id.label("id"),
+            Event.title.label("title"),
+            Pullable.rarity.label("rarity"),
+        ).join(Pullable, Pullable.id == Event.id)
     return select(
-        literal(EntityType.EVENT.value).label("entity_type"),
-        Event.id.label("id"),
-        Event.title.label("title"),
+        literal(EntityType.GROUP.value).label("entity_type"),
+        SocialGroup.id.label("id"),
+        SocialGroup.name.label("title"),
         Pullable.rarity.label("rarity"),
-    ).join(Pullable, Pullable.id == Event.id)
+    ).join(Pullable, Pullable.id == SocialGroup.id)
 
 
 def active_pullables(db: Session, entity_type: EntityType | None = None) -> list[PullCandidate]:

@@ -45,6 +45,7 @@ class EntityType(StrEnum):
     PLACE = "place"
     EVENT = "event"
     EPOCH = "epoch"
+    GROUP = "group"
 
 
 class ActivityAction(StrEnum):
@@ -53,6 +54,8 @@ class ActivityAction(StrEnum):
     DELETE = "delete"
     REPLACE_PARTICIPANTS = "replace_participants"
     REPLACE_PLACES = "replace_places"
+    REPLACE_GROUP_PEOPLE = "replace_group_people"
+    REPLACE_GROUP_EPOCHS = "replace_group_epochs"
     UPLOAD_MEDIA = "upload_media"
     DELETE_MEDIA = "delete_media"
 
@@ -238,11 +241,18 @@ class Person(Base, PullableEntityMixin):
 
 class Place(Base, PullableEntityMixin):
     __tablename__ = "place"
+    __table_args__ = (
+        CheckConstraint(
+            "address is null or length(address) <= 500",
+            name="ck_place_address_length",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(
         ForeignKey("pullable.id", ondelete="CASCADE", onupdate="CASCADE"), primary_key=True
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
+    address: Mapped[str | None] = mapped_column(String(500), nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     pullable: Mapped[Pullable] = relationship()
@@ -379,6 +389,19 @@ class Event(Base, PullableEntityMixin):
     pullable: Mapped[Pullable] = relationship()
 
 
+class SocialGroup(Base, PullableEntityMixin):
+    __tablename__ = "social_group"
+
+    id: Mapped[int] = mapped_column(
+        ForeignKey("pullable.id", ondelete="CASCADE", onupdate="CASCADE"),
+        primary_key=True,
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    pullable: Mapped[Pullable] = relationship()
+
+
 class PersonPlace(Base, AttributionMixin):
     __tablename__ = "person_place"
 
@@ -411,6 +434,40 @@ class PersonEvent(Base, AttributionMixin):
     event: Mapped[Event] = relationship()
 
 
+class SocialGroupPerson(Base, AttributionMixin):
+    __tablename__ = "social_group_person"
+
+    group_id: Mapped[int] = mapped_column(
+        ForeignKey("social_group.id", ondelete="CASCADE", onupdate="CASCADE"),
+        primary_key=True,
+    )
+    person_id: Mapped[int] = mapped_column(
+        ForeignKey("person.id", ondelete="CASCADE", onupdate="CASCADE"),
+        primary_key=True,
+        index=True,
+    )
+
+    group: Mapped[SocialGroup] = relationship()
+    person: Mapped[Person] = relationship()
+
+
+class SocialGroupEpoch(Base, AttributionMixin):
+    __tablename__ = "social_group_epoch"
+
+    group_id: Mapped[int] = mapped_column(
+        ForeignKey("social_group.id", ondelete="CASCADE", onupdate="CASCADE"),
+        primary_key=True,
+    )
+    epoch_id: Mapped[int] = mapped_column(
+        ForeignKey("epoch.id", ondelete="CASCADE", onupdate="CASCADE"),
+        primary_key=True,
+        index=True,
+    )
+
+    group: Mapped[SocialGroup] = relationship()
+    epoch: Mapped[Epoch] = relationship()
+
+
 class MediaAsset(Base):
     __tablename__ = "media_asset"
     __table_args__ = {"sqlite_autoincrement": True}
@@ -436,12 +493,13 @@ class ActivityLog(Base):
     __tablename__ = "activity_log"
     __table_args__ = (
         CheckConstraint(
-            "entity_type in ('person', 'place', 'epoch', 'event')",
+            "entity_type in ('person', 'place', 'epoch', 'event', 'group')",
             name="ck_activity_log_entity_type",
         ),
         CheckConstraint(
             "action in ('create', 'update', 'delete', 'replace_participants', "
-            "'replace_places', 'upload_media', 'delete_media')",
+            "'replace_places', 'replace_group_people', 'replace_group_epochs', "
+            "'upload_media', 'delete_media')",
             name="ck_activity_log_action",
         ),
         Index("ix_activity_log_actor_occurred_at", "actor_user_id", "occurred_at"),

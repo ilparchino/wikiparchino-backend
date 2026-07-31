@@ -343,6 +343,7 @@ def test_activity_summary_filters_and_deleted_content_title(client: httpx.Client
 
     summary = client.get("/api/admin/summary", headers=headers(admin_token)).json()
     assert summary["total_users"] == 2
+    assert summary["groups"] == 2
     assert summary["activity_last_24h"] > 0
 
     detail = client.get(f"/api/admin/users/{managed['id']}", headers=headers(admin_token)).json()

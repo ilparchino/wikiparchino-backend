@@ -8,15 +8,16 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.media_storage import MediaStorageError, StagedMediaDeletion, stage_media_deletion
-from app.models import ActivityAction, ActivityLog, EntityType, Epoch, Event, MediaAsset, Person, Place, Pullable, UserAccount
+from app.models import ActivityAction, ActivityLog, EntityType, Epoch, Event, MediaAsset, Person, Place, Pullable, SocialGroup, UserAccount
 
-ModelT = TypeVar("ModelT", Person, Place, Epoch, Event)
+ModelT = TypeVar("ModelT", Person, Place, Epoch, Event, SocialGroup)
 
 MODEL_BY_ENTITY: dict[EntityType, type[Any]] = {
     EntityType.PERSON: Person,
     EntityType.PLACE: Place,
     EntityType.EPOCH: Epoch,
     EntityType.EVENT: Event,
+    EntityType.GROUP: SocialGroup,
 }
 
 
@@ -108,7 +109,7 @@ def log_activity(
 def entity_title(item: Any, entity_type: EntityType) -> str:
     if entity_type == EntityType.PERSON:
         return item.alias
-    if entity_type in {EntityType.PLACE, EntityType.EPOCH}:
+    if entity_type in {EntityType.PLACE, EntityType.EPOCH, EntityType.GROUP}:
         return item.name
     return item.title
 

@@ -554,3 +554,227 @@ def test_epoch_partial_date_migration_rejects_invalid_legacy_events(
 
     with pytest.raises(RuntimeError, match="invalid event IDs: 12"):
         command.upgrade(config, "head")
+
+
+def test_place_address_migration_preserves_data_relationships_and_downgrades(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    db_path = tmp_path / "place-address.sqlite"
+    database_url = f"sqlite:///{db_path}"
+    monkeypatch.setenv("WIKI_PARCHINO_DATABASE_URL", database_url)
+    backend_dir = Path(__file__).resolve().parents[1]
+    config = migration_config(backend_dir)
+    command.upgrade(config, "0007_epoch_partial_dates")
+
+    engine = create_engine(database_url)
+    timestamp = "2026-07-31 10:00:00"
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "insert into pullable (id, rarity, created_at, updated_at) values "
+                "(10, 1.0, :time, :time), (11, 1.0, :time, :time), "
+                "(12, 1.0, :time, :time)"
+            ),
+            {"time": timestamp},
+        )
+        connection.execute(
+            text(
+                "insert into place (id, name, description) "
+                "values (10, 'Luogo esistente', 'Da conservare')"
+            )
+        )
+        connection.execute(
+            text("insert into epoch (id, name) values (11, 'Epoca esistente')")
+        )
+        connection.execute(
+            text(
+                "insert into event (id, epoch_id, place_id, title) "
+                "values (12, 11, 10, 'Evento collegato')"
+            )
+        )
+    engine.dispose()
+
+
+    command.upgrade(config, "head")
+    engine = create_engine(database_url)
+    with engine.begin() as connection:
+        place = connection.execute(
+            text("select * from place where id = 10")
+        ).mappings().one()
+        assert place["name"] == "Luogo esistente"
+        assert place["description"] == "Da conservare"
+        assert place["address"] is None
+        assert connection.execute(
+            text("select place_id from event where id = 12")
+        ).scalar_one() == 10
+
+        table_sql = connection.execute(
+            text(
+                "select sql from sqlite_master "
+                "where type = 'table' and name = 'place'"
+            )
+        ).scalar_one()
+        assert "ck_place_address_length" in table_sql
+        connection.execute(
+            text("update place set address = :address where id = 10"),
+            {"address": "x" * 500},
+        )
+        with pytest.raises(IntegrityError):
+            connection.execute(
+                text("update place set address = :address where id = 10"),
+                {"address": "x" * 501},
+            )
+        assert connection.exec_driver_sql("pragma foreign_key_check").all() == []
+    engine.dispose()
+
+    command.downgrade(config, "0007_epoch_partial_dates")
+    engine = create_engine(database_url)
+    with engine.connect() as connection:
+        columns = {
+            row["name"]
+            for row in connection.execute(text("pragma table_info(place)")).mappings()
+        }
+        assert "address" not in columns
+        assert connection.execute(
+            text("select name from place where id = 10")
+        ).scalar_one() == "Luogo esistente"
+        assert connection.execute(
+            text("select place_id from event where id = 12")
+        ).scalar_one() == 10
+        assert connection.exec_driver_sql("pragma foreign_key_check").all() == []
+    engine.dispose()
+
+
+def test_social_group_migration_preserves_activity_and_guards_downgrade(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    db_path = tmp_path / "social-groups.sqlite"
+    database_url = f"sqlite:///{db_path}"
+    monkeypatch.setenv("WIKI_PARCHINO_DATABASE_URL", database_url)
+    backend_dir = Path(__file__).resolve().parents[1]
+    config = migration_config(backend_dir)
+    command.upgrade(config, "0008_place_address")
+
+    engine = create_engine(database_url)
+    timestamp = "2026-07-31 12:00:00"
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "insert into pullable (id, rarity, created_at, updated_at) "
+                "values (10, 1.0, :time, :time), (11, 1.0, :time, :time)"
+            ),
+            {"time": timestamp},
+        )
+        connection.execute(
+            text(
+                "insert into person (id, alias, sex, connotation) "
+                "values (10, 'Persona', 'unknown', 'unknown')"
+            )
+        )
+        connection.execute(text("insert into epoch (id, name) values (11, 'Epoca')"))
+        connection.execute(
+            text(
+                "insert into activity_log "
+                "(id, entity_type, entity_id, action, occurred_at) "
+                "values (90, 'person', 10, 'create', :time)"
+            ),
+            {"time": timestamp},
+        )
+    engine.dispose()
+
+    command.upgrade(config, "head")
+    engine = create_engine(database_url)
+    with engine.begin() as connection:
+        tables = {
+            row[0]
+            for row in connection.execute(
+                text("select name from sqlite_master where type = 'table'")
+            )
+        }
+        assert {"social_group", "social_group_person", "social_group_epoch"} <= tables
+        assert connection.execute(
+            text("select entity_type from activity_log where id = 90")
+        ).scalar_one() == "person"
+        activity_sql = connection.execute(
+            text(
+                "select sql from sqlite_master "
+                "where type = 'table' and name = 'activity_log'"
+            )
+        ).scalar_one()
+        assert "'group'" in activity_sql
+        assert "'replace_group_people'" in activity_sql
+        assert "'replace_group_epochs'" in activity_sql
+        indexes = {
+            row[1]
+            for row in connection.execute(text("pragma index_list(activity_log)"))
+        }
+        assert "ix_activity_log_actor_occurred_at" in indexes
+        assert "ix_activity_log_occurred_at" in indexes
+
+        next_log_id = connection.execute(
+            text(
+                "insert into activity_log "
+                "(entity_type, entity_id, action, occurred_at) "
+                "values ('group', 12, 'create', :time) returning id"
+            ),
+            {"time": timestamp},
+        ).scalar_one()
+        assert next_log_id > 90
+        connection.execute(
+            text(
+                "insert into pullable (id, rarity, created_at, updated_at) "
+                "values (12, 1.0, :time, :time)"
+            ),
+            {"time": timestamp},
+        )
+        connection.execute(
+            text("insert into social_group (id, name) values (12, 'Cerchia')")
+        )
+        connection.execute(
+            text(
+                "insert into social_group_person "
+                "(group_id, person_id, created_at, updated_at) "
+                "values (12, 10, :time, :time)"
+            ),
+            {"time": timestamp},
+        )
+        connection.execute(
+            text(
+                "insert into social_group_epoch "
+                "(group_id, epoch_id, created_at, updated_at) "
+                "values (12, 11, :time, :time)"
+            ),
+            {"time": timestamp},
+        )
+        assert connection.exec_driver_sql("pragma foreign_key_check").all() == []
+    engine.dispose()
+
+    with pytest.raises(RuntimeError, match="Cerchia data or activity"):
+        command.downgrade(config, "0008_place_address")
+
+    engine = create_engine(database_url)
+    with engine.begin() as connection:
+        connection.execute(text("delete from activity_log where entity_type = 'group'"))
+        connection.execute(text("delete from social_group_person where group_id = 12"))
+        connection.execute(text("delete from social_group_epoch where group_id = 12"))
+        connection.execute(text("delete from social_group where id = 12"))
+        connection.execute(text("delete from pullable where id = 12"))
+    engine.dispose()
+
+    command.downgrade(config, "0008_place_address")
+    engine = create_engine(database_url)
+    with engine.connect() as connection:
+        tables = {
+            row[0]
+            for row in connection.execute(
+                text("select name from sqlite_master where type = 'table'")
+            )
+        }
+        assert "social_group" not in tables
+        assert connection.execute(
+            text("select entity_type from activity_log where id = 90")
+        ).scalar_one() == "person"
+        assert connection.exec_driver_sql("pragma foreign_key_check").all() == []
+    engine.dispose()

@@ -19,6 +19,7 @@ from app.models import (
     MediaAsset,
     Person,
     Place,
+    SocialGroup,
     SecurityEventLog,
     SecurityEventType,
     UserAccount,
@@ -191,6 +192,7 @@ def get_summary(
         places=db.query(Place).count(),
         epochs=db.query(Epoch).count(),
         events=db.query(Event).count(),
+        groups=db.query(SocialGroup).count(),
         media=db.query(MediaAsset).count(),
         activity_last_24h=(
             db.query(ActivityLog).filter(ActivityLog.occurred_at >= since).count()

@@ -24,6 +24,9 @@ from app.models import (
     SecurityEventLog,
     SecurityEventType,
     Sex,
+    SocialGroup,
+    SocialGroupEpoch,
+    SocialGroupPerson,
     UserAccount,
     UserSession,
 )
@@ -75,15 +78,24 @@ def test_rich_demo_seed_is_anonymized_complete_and_consistent(tmp_path: Path) ->
         assert db.query(Place).count() == 12
         assert db.query(Epoch).count() == 5
         assert db.query(Event).count() == 40
-        assert db.query(Pullable).count() == 81
+        assert db.query(SocialGroup).count() == 6
+        assert db.query(Pullable).count() == 87
         assert db.query(PersonPlace).count() == 48
         assert db.query(PersonEvent).count() == 160
+        assert db.query(SocialGroupPerson).count() == 38
+        assert db.query(SocialGroupEpoch).count() == 11
         assert {person.alias for person in db.query(Person).all()} == {
             f"Persona #{index}" for index in range(1, 25)
         }
         assert {place.name for place in db.query(Place).all()} == {
             f"Luogo #{index}" for index in range(1, 13)
         }
+        assert db.query(Place).filter(Place.address.is_not(None)).count() == 8
+        assert db.query(Place).filter(Place.address.is_(None)).count() == 4
+        assert all(
+            place.address is None or "Dimostrativa" in place.address
+            for place in db.query(Place).all()
+        )
         assert {epoch.name for epoch in db.query(Epoch).all()} == {
             f"Epoca #{index}" for index in range(1, 6)
         }
@@ -108,6 +120,12 @@ def test_rich_demo_seed_is_anonymized_complete_and_consistent(tmp_path: Path) ->
         assert {event.title for event in db.query(Event).all()} == {
             f"Evento #{index}" for index in range(1, 41)
         }
+        assert {group.name for group in db.query(SocialGroup).all()} == {
+            f"Cerchia #{index}" for index in range(1, 7)
+        }
+        empty_group = db.query(SocialGroup).filter_by(name="Cerchia #6").one()
+        assert db.query(SocialGroupPerson).filter_by(group_id=empty_group.id).count() == 0
+        assert db.query(SocialGroupEpoch).filter_by(group_id=empty_group.id).count() == 0
 
         assert {person.sex for person in db.query(Person).all()} == {
             value.value for value in Sex
@@ -162,7 +180,7 @@ def test_rich_demo_seed_is_anonymized_complete_and_consistent(tmp_path: Path) ->
         }
 
         assets = db.query(MediaAsset).all()
-        assert len(assets) == 18
+        assert len(assets) == 20
         assert all(Path(asset.disk_path).is_file() for asset in assets)
         assert all(Path(asset.disk_path).parent == media_dir.resolve() for asset in assets)
         assert all(Path(asset.disk_path).read_bytes().startswith(b"<?xml") for asset in assets)
@@ -171,17 +189,18 @@ def test_rich_demo_seed_is_anonymized_complete_and_consistent(tmp_path: Path) ->
             .group_by(MediaAsset.pullable_id)
             .all()
         )
-        assert len(image_counts) == 14
+        assert len(image_counts) == 16
         assert list(image_counts.values()).count(2) == 4
         assert db.query(MediaAsset).join(Person, Person.id == MediaAsset.pullable_id).count() == 6
         assert db.query(MediaAsset).join(Place, Place.id == MediaAsset.pullable_id).count() == 5
         assert db.query(MediaAsset).join(Epoch, Epoch.id == MediaAsset.pullable_id).count() == 3
         assert db.query(MediaAsset).join(Event, Event.id == MediaAsset.pullable_id).count() == 4
+        assert db.query(MediaAsset).join(SocialGroup, SocialGroup.id == MediaAsset.pullable_id).count() == 2
         rendered_images = b"".join(Path(asset.disk_path).read_bytes() for asset in assets)
         assert b'width="480" height="640"' in rendered_images
         assert b'width="640" height="360"' in rendered_images
 
-        assert db.query(ActivityLog).count() == 163
+        assert db.query(ActivityLog).count() == 181
         assert db.query(SecurityEventLog).count() == 9
         active_ids = {
             user.id
@@ -205,6 +224,18 @@ def test_rich_demo_seed_is_anonymized_complete_and_consistent(tmp_path: Path) ->
         ):
             links = db.query(PersonEvent).filter_by(event_id=log.entity_id).all()
             assert len(links) == 4
+            assert all(link.created_at == link.updated_at == log.occurred_at for link in links)
+        for log in db.query(ActivityLog).filter_by(
+            action=ActivityAction.REPLACE_GROUP_PEOPLE.value
+        ):
+            links = db.query(SocialGroupPerson).filter_by(group_id=log.entity_id).all()
+            assert links
+            assert all(link.created_at == link.updated_at == log.occurred_at for link in links)
+        for log in db.query(ActivityLog).filter_by(
+            action=ActivityAction.REPLACE_GROUP_EPOCHS.value
+        ):
+            links = db.query(SocialGroupEpoch).filter_by(group_id=log.entity_id).all()
+            assert links
             assert all(link.created_at == link.updated_at == log.occurred_at for link in links)
         for log in db.query(ActivityLog).filter_by(
             action=ActivityAction.UPLOAD_MEDIA.value
@@ -294,8 +325,13 @@ def test_minimal_test_seed_remains_small_and_has_no_history(tmp_path: Path) -> N
         assert verify_password("admin", admin.password_hash)
         assert db.query(Person).count() == 3
         assert db.query(Place).count() == 2
+        assert db.query(Place).filter(Place.address.is_not(None)).count() == 1
+        assert db.query(Place).filter(Place.address.is_(None)).count() == 1
         assert db.query(Epoch).count() == 1
         assert db.query(Event).count() == 1
+        assert db.query(SocialGroup).count() == 2
+        assert db.query(SocialGroupPerson).count() == 1
+        assert db.query(SocialGroupEpoch).count() == 1
         assert db.query(PersonEvent).count() == 3
         assert db.query(MediaAsset).count() == 0
         assert db.query(ActivityLog).count() == 0

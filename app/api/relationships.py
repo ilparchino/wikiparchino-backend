@@ -1,16 +1,35 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session, joinedload
 
 from app.api.deps import current_user
-from app.api.utils import active_or_404, log_activity, touch_pullable
+from app.api.utils import active_or_404, ensure_reference, log_activity, touch_pullable
 from app.database import get_db
-from app.models import ActivityAction, EntityType, Epoch, Event, Person, PersonEvent, PersonPlace, Place, UserAccount, utcnow
+from app.models import (
+    ActivityAction,
+    EntityType,
+    Epoch,
+    Event,
+    Person,
+    PersonEvent,
+    PersonPlace,
+    Place,
+    SocialGroup,
+    SocialGroupEpoch,
+    SocialGroupPerson,
+    UserAccount,
+    utcnow,
+)
 from app.schemas import (
     EventOut,
     EventParticipantIn,
     EventParticipantOut,
+    GroupEpochsUpdate,
+    GroupOut,
+    GroupPeopleUpdate,
+    EpochOut,
+    PersonOut,
     PersonEventOut,
     PersonPlaceIn,
     PersonPlaceOut,
@@ -182,5 +201,157 @@ def list_epoch_events(
         .options(joinedload(Event.pullable), joinedload(Event.place).joinedload(Place.pullable), joinedload(Event.epoch))
         .filter(Event.epoch_id == epoch_id)
         .order_by(Event.year.desc().nullslast(), Event.month.desc().nullslast(), Event.day.desc().nullslast(), Event.title)
+        .all()
+    )
+
+
+def ensure_unique_ids(ids: list[int], label: str) -> None:
+    if len(ids) != len(set(ids)):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Ogni {label} può essere collegata una sola volta",
+        )
+
+
+@router.get("/groups/{group_id}/people", response_model=list[PersonOut])
+def list_group_people(
+    group_id: int,
+    user: UserAccount = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> list[Person]:
+    active_or_404(db, SocialGroup, group_id)
+    return (
+        db.query(Person)
+        .join(SocialGroupPerson, SocialGroupPerson.person_id == Person.id)
+        .options(joinedload(Person.pullable))
+        .filter(SocialGroupPerson.group_id == group_id)
+        .order_by(Person.alias, Person.id)
+        .all()
+    )
+
+
+@router.put("/groups/{group_id}/people", response_model=list[PersonOut])
+def replace_group_people(
+    group_id: int,
+    payload: GroupPeopleUpdate,
+    user: UserAccount = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> list[Person]:
+    group = active_or_404(db, SocialGroup, group_id)
+    ensure_unique_ids(payload.person_ids, "persona")
+    for person_id in payload.person_ids:
+        ensure_reference(db, Person, person_id, "persona")
+    timestamp = utcnow()
+    db.query(SocialGroupPerson).filter(SocialGroupPerson.group_id == group_id).delete()
+    for person_id in payload.person_ids:
+        db.add(
+            SocialGroupPerson(
+                group_id=group_id,
+                person_id=person_id,
+                created_at=timestamp,
+                updated_at=timestamp,
+                created_by=user.id,
+                updated_by=user.id,
+            )
+        )
+    touch_pullable(group.pullable, user.id, timestamp)
+    log_activity(
+        db,
+        user,
+        EntityType.GROUP,
+        group_id,
+        ActivityAction.REPLACE_GROUP_PEOPLE,
+        timestamp,
+        payload.model_dump(),
+    )
+    db.commit()
+    return list_group_people(group_id, user, db)
+
+
+@router.get("/groups/{group_id}/epochs", response_model=list[EpochOut])
+def list_group_epochs(
+    group_id: int,
+    user: UserAccount = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> list[Epoch]:
+    active_or_404(db, SocialGroup, group_id)
+    return (
+        db.query(Epoch)
+        .join(SocialGroupEpoch, SocialGroupEpoch.epoch_id == Epoch.id)
+        .options(joinedload(Epoch.pullable))
+        .filter(SocialGroupEpoch.group_id == group_id)
+        .order_by(Epoch.name, Epoch.id)
+        .all()
+    )
+
+
+@router.put("/groups/{group_id}/epochs", response_model=list[EpochOut])
+def replace_group_epochs(
+    group_id: int,
+    payload: GroupEpochsUpdate,
+    user: UserAccount = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> list[Epoch]:
+    group = active_or_404(db, SocialGroup, group_id)
+    ensure_unique_ids(payload.epoch_ids, "epoca")
+    for epoch_id in payload.epoch_ids:
+        ensure_reference(db, Epoch, epoch_id, "epoca")
+    timestamp = utcnow()
+    db.query(SocialGroupEpoch).filter(SocialGroupEpoch.group_id == group_id).delete()
+    for epoch_id in payload.epoch_ids:
+        db.add(
+            SocialGroupEpoch(
+                group_id=group_id,
+                epoch_id=epoch_id,
+                created_at=timestamp,
+                updated_at=timestamp,
+                created_by=user.id,
+                updated_by=user.id,
+            )
+        )
+    touch_pullable(group.pullable, user.id, timestamp)
+    log_activity(
+        db,
+        user,
+        EntityType.GROUP,
+        group_id,
+        ActivityAction.REPLACE_GROUP_EPOCHS,
+        timestamp,
+        payload.model_dump(),
+    )
+    db.commit()
+    return list_group_epochs(group_id, user, db)
+
+
+@router.get("/people/{person_id}/groups", response_model=list[GroupOut])
+def list_person_groups(
+    person_id: int,
+    user: UserAccount = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> list[SocialGroup]:
+    active_or_404(db, Person, person_id)
+    return (
+        db.query(SocialGroup)
+        .join(SocialGroupPerson, SocialGroupPerson.group_id == SocialGroup.id)
+        .options(joinedload(SocialGroup.pullable))
+        .filter(SocialGroupPerson.person_id == person_id)
+        .order_by(SocialGroup.name, SocialGroup.id)
+        .all()
+    )
+
+
+@router.get("/epochs/{epoch_id}/groups", response_model=list[GroupOut])
+def list_epoch_groups(
+    epoch_id: int,
+    user: UserAccount = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> list[SocialGroup]:
+    active_or_404(db, Epoch, epoch_id)
+    return (
+        db.query(SocialGroup)
+        .join(SocialGroupEpoch, SocialGroupEpoch.group_id == SocialGroup.id)
+        .options(joinedload(SocialGroup.pullable))
+        .filter(SocialGroupEpoch.epoch_id == epoch_id)
+        .order_by(SocialGroup.name, SocialGroup.id)
         .all()
     )

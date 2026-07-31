@@ -174,12 +174,18 @@ def test_protected_api_routes_reject_unauthenticated_requests(client: httpx.Clie
         "/api/epochs/5",
         "/api/events",
         "/api/events/6",
+        "/api/groups",
+        "/api/groups/7",
+        "/api/groups/7/people",
+        "/api/groups/7/epochs",
         "/api/events/6/participants",
         "/api/people/1/events",
         "/api/people/1/places",
+        "/api/people/1/groups",
         "/api/places/3/people",
         "/api/places/3/events",
         "/api/epochs/5/events",
+        "/api/epochs/5/groups",
         "/api/search?q=parchino",
         "/api/pulls/random",
         "/api/pulls/daily?day=2026-07-11",
@@ -193,6 +199,9 @@ def test_protected_api_routes_reject_unauthenticated_requests(client: httpx.Clie
     assert_status(client.post("/api/auth/logout"), 401)
     assert_status(client.post("/api/people", json={"alias": "No auth", "rarity": 1.0}), 401)
     assert_status(client.put("/api/people/1/places", json=[]), 401)
+    assert_status(client.post("/api/groups", json={"name": "No auth", "rarity": 1.0}), 401)
+    assert_status(client.put("/api/groups/7/people", json={"person_ids": []}), 401)
+    assert_status(client.put("/api/groups/7/epochs", json={"epoch_ids": []}), 401)
 
 
 def test_comprehensive_authenticated_api_scenario(client: httpx.Client) -> None:
@@ -203,16 +212,19 @@ def test_comprehensive_authenticated_api_scenario(client: httpx.Client) -> None:
     places = client.get("/api/places")
     epochs = client.get("/api/epochs")
     events = client.get("/api/events")
-    for response in [people, places, epochs, events]:
+    groups = client.get("/api/groups")
+    for response in [people, places, epochs, events, groups]:
         assert_status(response, 200)
 
     seeded_person = first(people.json(), "person")
     seeded_place = first(places.json(), "place")
     seeded_epoch = first(epochs.json(), "epoch")
     seeded_event = first(events.json(), "event")
+    seeded_group = first(groups.json(), "group")
 
     assert_status(client.get(f"/api/people/{seeded_person['id']}"), 200)
     assert_status(client.get(f"/api/places/{seeded_place['id']}"), 200)
+    assert_status(client.get(f"/api/groups/{seeded_group['id']}"), 200)
     assert_status(client.get(f"/api/epochs/{seeded_epoch['id']}"), 200)
     event_detail = client.get(f"/api/events/{seeded_event['id']}")
     assert_status(event_detail, 200)

@@ -115,6 +115,7 @@ class AdminSummaryOut(BaseModel):
     places: int
     epochs: int
     events: int
+    groups: int
     media: int
     activity_last_24h: int
 
@@ -196,7 +197,20 @@ class PersonOut(PersonBase):
 
 class PlaceBase(RarityMixin):
     name: str = Field(min_length=1, max_length=255)
+    address: str | None = Field(default=None, max_length=500)
     description: str | None = None
+
+    @field_validator("address", mode="before")
+    @classmethod
+    def normalize_address(cls, value: object) -> object:
+        if value is None or not isinstance(value, str):
+            return value
+        normalized = value.strip()
+        if not normalized:
+            return None
+        if not normalized.isprintable():
+            raise ValueError("L'indirizzo deve essere composto da caratteri stampabili su una sola riga")
+        return normalized
 
 
 class PlaceCreate(PlaceBase):
@@ -292,6 +306,34 @@ class EventOut(EventBase):
     model_config = {"from_attributes": True}
 
 
+class GroupBase(RarityMixin):
+    name: str = Field(min_length=1, max_length=255)
+    description: str | None = None
+
+
+class GroupCreate(GroupBase):
+    pass
+
+
+class GroupUpdate(GroupBase):
+    pass
+
+
+class GroupOut(GroupBase):
+    id: int
+    created_at: datetime
+    updated_at: datetime
+    created_by: int | None = None
+    updated_by: int | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class GroupSummaryOut(GroupOut):
+    people_count: int
+    epoch_count: int
+
+
 class PullableOut(BaseModel):
     id: int
     rarity: float
@@ -355,6 +397,14 @@ class PlacePersonOut(BaseModel):
     person: PersonOut | None = None
 
     model_config = {"from_attributes": True}
+
+
+class GroupPeopleUpdate(BaseModel):
+    person_ids: list[int]
+
+
+class GroupEpochsUpdate(BaseModel):
+    epoch_ids: list[int]
 
 
 class SearchResult(BaseModel):

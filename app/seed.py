@@ -26,6 +26,9 @@ from app.models import (
     SecurityEventLog,
     SecurityEventType,
     Sex,
+    SocialGroup,
+    SocialGroupEpoch,
+    SocialGroupPerson,
     UserAccount,
     UserSession,
     utcnow,
@@ -35,7 +38,7 @@ from app.security_events import log_security_event
 
 DEMO_PASSWORD = "demo-password-123"
 TEST_PASSWORD = "admin"
-EntityT = TypeVar("EntityT", Person, Place, Epoch, Event)
+EntityT = TypeVar("EntityT", Person, Place, Epoch, Event, SocialGroup)
 
 
 class SeedDataError(RuntimeError):
@@ -228,6 +231,11 @@ def create_places(
                 start + timedelta(hours=index),
                 rarities[index % len(rarities)],
                 name=f"Luogo #{index}",
+                address=(
+                    None
+                    if index % 3 == 0
+                    else f"Via Dimostrativa #{index}, 100{index:02d} Città #{(index % 4) + 1}"
+                ),
                 description=(
                     None
                     if index % 5 == 0
@@ -326,6 +334,110 @@ def create_events(
             )
         )
     return events
+
+
+def create_groups(
+    db: Session, actors: list[UserAccount], now: datetime
+) -> list[SocialGroup]:
+    start = now - timedelta(days=30)
+    groups: list[SocialGroup] = []
+    for index in range(1, 7):
+        actor = actors[(index + 4) % len(actors)]
+        groups.append(
+            add_entity(
+                db,
+                SocialGroup,
+                EntityType.GROUP,
+                actor,
+                start + timedelta(hours=index),
+                (0.5, 1.0, 1.5, 2.0, 3.0, 1.0)[index - 1],
+                name=f"Cerchia #{index}",
+                description=(
+                    None
+                    if index in {4, 6}
+                    else f"Descrizione generica della cerchia #{index}."
+                ),
+            )
+        )
+    return groups
+
+
+def create_group_links(
+    db: Session,
+    actors: list[UserAccount],
+    groups: list[SocialGroup],
+    people: list[Person],
+    epochs: list[Epoch],
+    now: datetime,
+) -> None:
+    people_by_group = (
+        range(0, 8),
+        range(4, 12),
+        range(9, 18),
+        range(16, 24),
+        range(0, 24, 5),
+        (),
+    )
+    epochs_by_group = (
+        (0, 1),
+        (1, 2),
+        (2, 3),
+        (3, 4),
+        (0, 2, 4),
+        (),
+    )
+    start = now - timedelta(days=8)
+    for index, group in enumerate(groups):
+        actor = actors[(index + 2) % len(actors)]
+        person_ids = [people[person_index].id for person_index in people_by_group[index]]
+        if person_ids:
+            timestamp = start + timedelta(hours=index * 2)
+            for person_id in person_ids:
+                db.add(
+                    SocialGroupPerson(
+                        group_id=group.id,
+                        person_id=person_id,
+                        created_at=timestamp,
+                        updated_at=timestamp,
+                        created_by=actor.id,
+                        updated_by=actor.id,
+                    )
+                )
+            touch_entity(group, actor, timestamp)
+            add_activity(
+                db,
+                actor,
+                EntityType.GROUP,
+                group.id,
+                ActivityAction.REPLACE_GROUP_PEOPLE,
+                timestamp,
+                {"person_ids": person_ids},
+            )
+
+        epoch_ids = [epochs[epoch_index].id for epoch_index in epochs_by_group[index]]
+        if epoch_ids:
+            timestamp = start + timedelta(hours=index * 2 + 1)
+            for epoch_id in epoch_ids:
+                db.add(
+                    SocialGroupEpoch(
+                        group_id=group.id,
+                        epoch_id=epoch_id,
+                        created_at=timestamp,
+                        updated_at=timestamp,
+                        created_by=actor.id,
+                        updated_by=actor.id,
+                    )
+                )
+            touch_entity(group, actor, timestamp)
+            add_activity(
+                db,
+                actor,
+                EntityType.GROUP,
+                group.id,
+                ActivityAction.REPLACE_GROUP_EPOCHS,
+                timestamp,
+                {"epoch_ids": epoch_ids},
+            )
 
 
 def create_person_place_links(
@@ -436,6 +548,7 @@ def create_media(
     places: list[Place],
     epochs: list[Epoch],
     events: list[Event],
+    groups: list[SocialGroup],
     media_dir: Path,
     now: datetime,
     created_files: list[Path],
@@ -454,6 +567,8 @@ def create_media(
         (EntityType.EVENT, events[0]),
         (EntityType.EVENT, events[1]),
         (EntityType.EVENT, events[2]),
+        (EntityType.GROUP, groups[0]),
+        (EntityType.GROUP, groups[1]),
     ]
     media_dir.mkdir(parents=True, exist_ok=True)
     start = now - timedelta(hours=len(targets) - 1)
@@ -503,8 +618,10 @@ def seed_demo_data(
         places = create_places(db, active_users, timestamp)
         epochs = create_epochs(db, active_users, timestamp)
         events = create_events(db, active_users, places, epochs, timestamp)
+        groups = create_groups(db, active_users, timestamp)
         create_person_place_links(db, active_users, people, places, timestamp)
         create_event_participants(db, active_users, people, events, timestamp)
+        create_group_links(db, active_users, groups, people, epochs, timestamp)
         create_media(
             db,
             active_users,
@@ -512,6 +629,7 @@ def seed_demo_data(
             places,
             epochs,
             events,
+            groups,
             target_media_dir,
             timestamp,
             created_files,
@@ -567,6 +685,11 @@ def seed_test_data(db: Session) -> None:
             timestamp,
             log_creation=False,
             name=f"Luogo #{index}",
+            address=(
+                "Via Dimostrativa #1, 10001 Città #1"
+                if index == 1
+                else None
+            ),
             description=f"Descrizione generica del luogo #{index}.",
         )
         for index in range(1, 3)
@@ -597,6 +720,43 @@ def seed_test_data(db: Session) -> None:
         year=2025,
         month=8,
         day=None,
+    )
+    groups = [
+        add_entity(
+            db,
+            SocialGroup,
+            EntityType.GROUP,
+            admin,
+            timestamp,
+            log_creation=False,
+            name=f"Cerchia #{index}",
+            description=(
+                "Descrizione generica della cerchia #1."
+                if index == 1
+                else None
+            ),
+        )
+        for index in range(1, 3)
+    ]
+    db.add(
+        SocialGroupPerson(
+            group_id=groups[0].id,
+            person_id=people[0].id,
+            created_at=timestamp,
+            updated_at=timestamp,
+            created_by=admin.id,
+            updated_by=admin.id,
+        )
+    )
+    db.add(
+        SocialGroupEpoch(
+            group_id=groups[0].id,
+            epoch_id=epoch.id,
+            created_at=timestamp,
+            updated_at=timestamp,
+            created_by=admin.id,
+            updated_by=admin.id,
+        )
     )
     roles = ("Guida", "Organizzatore", None)
     for person, role in zip(people, roles, strict=True):

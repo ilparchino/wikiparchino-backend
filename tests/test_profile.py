@@ -109,6 +109,17 @@ def test_relationship_and_media_changes_are_profile_updates(
     assert activity[0]["entity_type"] == "event"
     assert activity[0]["action"] == "updated"
 
+    group = auth_client.get("/api/groups").json()[0]
+    replaced_group = auth_client.put(
+        f"/api/groups/{group['id']}/people",
+        json={"person_ids": [person["id"]]},
+    )
+    assert replaced_group.status_code == 200
+    activity = auth_client.get("/api/profile").json()["recent_activity"]
+    assert activity[0]["entity_id"] == group["id"]
+    assert activity[0]["entity_type"] == "group"
+    assert activity[0]["action"] == "updated"
+
     image = tmp_path / "profile.png"
     image.write_bytes(b"\x89PNG\r\n\x1a\n")
     with image.open("rb") as handle:
