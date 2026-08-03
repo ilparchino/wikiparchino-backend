@@ -195,8 +195,9 @@ All application endpoints are under `/api`:
 - `/profile` and `/profile/password`
 - `/admin/summary`, `/admin/users`, and `/admin/activity` (administrators only)
 - `/people`, `/places`, `/epochs`, `/events`, and `/groups`
+- collection searches at `/people/search`, `/places/search`, `/epochs/search`, `/events/search`, and `/groups/search`
 - relationship endpoints nested under people, places, epochs, events, and groups
-- `/search`
+- `/search` for cross-entity search
 - `/pulls/random` and `/pulls/daily`
 - `/media`, `/media/previews`, and `/media/{id}`
 
@@ -205,6 +206,8 @@ Except for health, maintenance status, and login, application endpoints require 
 Epochs may define an optional partial start and/or end date. Partial dates support year, year-month, or complete Gregorian precision. Event writes are rejected only when their possible date interval is definitely outside the selected epoch boundary; ambiguous overlaps remain valid. Updating an epoch is rejected when its proposed boundaries would exclude an existing linked event.
 
 Groups represent Italian UI "Cerchie" and are regular pullable entities with rarity, media, search, and activity history. Group membership with people and epochs is many-to-many. Membership sets are replaced independently through the group relationship endpoints; reciprocal person and epoch routes are read-only.
+
+Collection search endpoints accept `q` and an optional `limit` from 1 to 50, and return lightweight `id`, `title`, and `subtitle` results. Person-event links are written from events, and person-group links are written from groups. Person-place links may be replaced from either side; changed relationships update the metadata and activity of both affected entities.
 
 Administrators deactivate accounts instead of deleting them. Deactivation immediately revokes all sessions while preserving attribution and activity history; reactivation permits a future login but does not create a session. Content actions remain in `activity_log`. Account and access actions are stored separately in `security_event_log`; authentication events are pruned after 90 days and credential material is never logged. The OpenAPI UI is the authoritative interactive endpoint reference.
 

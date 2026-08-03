@@ -33,10 +33,23 @@ from app.schemas import (
     PersonEventOut,
     PersonPlaceIn,
     PersonPlaceOut,
+    PlacePersonIn,
     PlacePersonOut,
 )
 
 router = APIRouter(tags=["relationships"])
+
+
+def changed_relationship_ids(
+    previous: dict[int, str | None],
+    proposed: dict[int, str | None],
+) -> set[int]:
+    missing = object()
+    return {
+        entity_id
+        for entity_id in previous.keys() | proposed.keys()
+        if previous.get(entity_id, missing) != proposed.get(entity_id, missing)
+    }
 
 
 @router.get("/events/{event_id}/participants", response_model=list[EventParticipantOut])
@@ -62,8 +75,9 @@ def replace_event_participants(
     db: Session = Depends(get_db),
 ) -> list[PersonEvent]:
     event = active_or_404(db, Event, event_id)
+    ensure_unique_ids([entry.person_id for entry in payload], "persona")
     for entry in payload:
-        active_or_404(db, Person, entry.person_id)
+        ensure_reference(db, Person, entry.person_id, "persona")
     timestamp = utcnow()
     db.query(PersonEvent).filter(PersonEvent.event_id == event_id).delete()
     for entry in payload:
@@ -133,8 +147,16 @@ def replace_person_places(
     db: Session = Depends(get_db),
 ) -> list[PersonPlace]:
     person = active_or_404(db, Person, person_id)
+    ensure_unique_ids([entry.place_id for entry in payload], "luogo")
+    places: dict[int, Place] = {}
     for entry in payload:
-        active_or_404(db, Place, entry.place_id)
+        places[entry.place_id] = ensure_reference(db, Place, entry.place_id, "luogo")
+    previous = {
+        link.place_id: link.motivation
+        for link in db.query(PersonPlace).filter(PersonPlace.person_id == person_id).all()
+    }
+    proposed = {entry.place_id: entry.motivation for entry in payload}
+    changed_place_ids = changed_relationship_ids(previous, proposed)
     timestamp = utcnow()
     db.query(PersonPlace).filter(PersonPlace.person_id == person_id).delete()
     for entry in payload:
@@ -159,6 +181,22 @@ def replace_person_places(
         timestamp,
         [item.model_dump() for item in payload],
     )
+    for place_id in sorted(changed_place_ids):
+        place = places.get(place_id) or ensure_reference(db, Place, place_id, "luogo")
+        touch_pullable(place.pullable, user.id, timestamp)
+        log_activity(
+            db,
+            user,
+            EntityType.PLACE,
+            place_id,
+            ActivityAction.REPLACE_PEOPLE,
+            timestamp,
+            {
+                "person_id": person_id,
+                "linked": place_id in proposed,
+                "motivation": proposed.get(place_id),
+            },
+        )
     db.commit()
     return list_person_places(person_id, user, db)
 
@@ -175,6 +213,68 @@ def list_place_people(
         .order_by(PersonPlace.person_id)
         .all()
     )
+
+
+@router.put("/places/{place_id}/people", response_model=list[PlacePersonOut])
+def replace_place_people(
+    place_id: int,
+    payload: list[PlacePersonIn],
+    user: UserAccount = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> list[PersonPlace]:
+    place = active_or_404(db, Place, place_id)
+    ensure_unique_ids([entry.person_id for entry in payload], "persona")
+    people: dict[int, Person] = {}
+    for entry in payload:
+        people[entry.person_id] = ensure_reference(db, Person, entry.person_id, "persona")
+    previous = {
+        link.person_id: link.motivation
+        for link in db.query(PersonPlace).filter(PersonPlace.place_id == place_id).all()
+    }
+    proposed = {entry.person_id: entry.motivation for entry in payload}
+    changed_person_ids = changed_relationship_ids(previous, proposed)
+    timestamp = utcnow()
+    db.query(PersonPlace).filter(PersonPlace.place_id == place_id).delete()
+    for entry in payload:
+        db.add(
+            PersonPlace(
+                person_id=entry.person_id,
+                place_id=place_id,
+                motivation=entry.motivation,
+                created_at=timestamp,
+                updated_at=timestamp,
+                created_by=user.id,
+                updated_by=user.id,
+            )
+        )
+    touch_pullable(place.pullable, user.id, timestamp)
+    log_activity(
+        db,
+        user,
+        EntityType.PLACE,
+        place_id,
+        ActivityAction.REPLACE_PEOPLE,
+        timestamp,
+        [item.model_dump() for item in payload],
+    )
+    for person_id in sorted(changed_person_ids):
+        person = people.get(person_id) or ensure_reference(db, Person, person_id, "persona")
+        touch_pullable(person.pullable, user.id, timestamp)
+        log_activity(
+            db,
+            user,
+            EntityType.PERSON,
+            person_id,
+            ActivityAction.REPLACE_PLACES,
+            timestamp,
+            {
+                "place_id": place_id,
+                "linked": person_id in proposed,
+                "motivation": proposed.get(person_id),
+            },
+        )
+    db.commit()
+    return list_place_people(place_id, user, db)
 
 
 @router.get("/places/{place_id}/events", response_model=list[EventOut])

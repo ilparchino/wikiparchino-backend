@@ -45,12 +45,13 @@ def create_app() -> FastAPI:
 
     app.include_router(auth.router, prefix="/api")
     app.include_router(maintenance.router, prefix="/api")
+    # Static collection search routes must precede routes such as /people/{id}.
+    app.include_router(search.router, prefix="/api")
     app.include_router(entities.router, prefix="/api")
     app.include_router(relationships.router, prefix="/api")
     app.include_router(media.router, prefix="/api")
     app.include_router(profile.router, prefix="/api")
     app.include_router(admin.router, prefix="/api")
-    app.include_router(search.router, prefix="/api")
     app.include_router(pulls.router, prefix="/api")
 
     @app.get("/api/health")

@@ -54,6 +54,7 @@ class ActivityAction(StrEnum):
     DELETE = "delete"
     REPLACE_PARTICIPANTS = "replace_participants"
     REPLACE_PLACES = "replace_places"
+    REPLACE_PEOPLE = "replace_people"
     REPLACE_GROUP_PEOPLE = "replace_group_people"
     REPLACE_GROUP_EPOCHS = "replace_group_epochs"
     UPLOAD_MEDIA = "upload_media"
@@ -498,7 +499,7 @@ class ActivityLog(Base):
         ),
         CheckConstraint(
             "action in ('create', 'update', 'delete', 'replace_participants', "
-            "'replace_places', 'replace_group_people', 'replace_group_epochs', "
+            "'replace_places', 'replace_people', 'replace_group_people', 'replace_group_epochs', "
             "'upload_media', 'delete_media')",
             name="ck_activity_log_action",
         ),

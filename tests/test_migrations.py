@@ -684,6 +684,7 @@ def test_social_group_migration_preserves_activity_and_guards_downgrade(
         )
     engine.dispose()
 
+
     command.upgrade(config, "head")
     engine = create_engine(database_url)
     with engine.begin() as connection:
@@ -776,5 +777,72 @@ def test_social_group_migration_preserves_activity_and_guards_downgrade(
         assert connection.execute(
             text("select entity_type from activity_log where id = 90")
         ).scalar_one() == "person"
+        assert connection.exec_driver_sql("pragma foreign_key_check").all() == []
+    engine.dispose()
+
+
+def test_place_people_activity_migration_preserves_rows_and_guards_downgrade(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    db_path = tmp_path / "place-people-activity.sqlite"
+    database_url = f"sqlite:///{db_path}"
+    monkeypatch.setenv("WIKI_PARCHINO_DATABASE_URL", database_url)
+    backend_dir = Path(__file__).resolve().parents[1]
+    config = migration_config(backend_dir)
+    command.upgrade(config, "0009_social_groups")
+
+    timestamp = "2026-08-03 10:00:00.000000"
+    engine = create_engine(database_url)
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "insert into activity_log "
+                "(id, entity_type, entity_id, action, occurred_at) "
+                "values (91, 'place', 7, 'update', :time)"
+            ),
+            {"time": timestamp},
+        )
+    engine.dispose()
+
+    command.upgrade(config, "head")
+    engine = create_engine(database_url)
+    with engine.begin() as connection:
+        assert connection.execute(
+            text("select action from activity_log where id = 91")
+        ).scalar_one() == "update"
+        table_sql = connection.execute(
+            text("select sql from sqlite_master where type='table' and name='activity_log'")
+        ).scalar_one()
+        assert "replace_people" in table_sql
+        connection.execute(
+            text(
+                "insert into activity_log "
+                "(entity_type, entity_id, action, occurred_at) "
+                "values ('place', 7, 'replace_people', :time)"
+            ),
+            {"time": timestamp},
+        )
+        assert connection.exec_driver_sql("pragma foreign_key_check").all() == []
+    engine.dispose()
+
+    with pytest.raises(RuntimeError, match="replace_people activity"):
+        command.downgrade(config, "0009_social_groups")
+
+    engine = create_engine(database_url)
+    with engine.begin() as connection:
+        connection.execute(text("delete from activity_log where action = 'replace_people'"))
+    engine.dispose()
+    command.downgrade(config, "0009_social_groups")
+
+    engine = create_engine(database_url)
+    with engine.connect() as connection:
+        table_sql = connection.execute(
+            text("select sql from sqlite_master where type='table' and name='activity_log'")
+        ).scalar_one()
+        assert "replace_people" not in table_sql
+        assert connection.execute(
+            text("select action from activity_log where id = 91")
+        ).scalar_one() == "update"
         assert connection.exec_driver_sql("pragma foreign_key_check").all() == []
     engine.dispose()

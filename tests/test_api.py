@@ -48,6 +48,40 @@ def test_crud_hard_delete_and_search(auth_client: httpx.Client) -> None:
     assert auth_client.get(f"/api/people/{person_id}").status_code == 404
 
 
+def test_collection_search_routes_are_typed_limited_and_ordered(
+    auth_client: httpx.Client,
+) -> None:
+    cases = (
+        ("people", "Persona", "Persona #1"),
+        ("places", "Dimostrativa", "Luogo #1"),
+        ("epochs", "Epoca", "Epoca #1"),
+        ("events", "Evento", "Evento #1"),
+        ("groups", "Cerchia", "Cerchia #1"),
+    )
+    for collection, query, expected_title in cases:
+        response = auth_client.get(
+            f"/api/{collection}/search",
+            params={"q": query, "limit": 20},
+        )
+        assert response.status_code == 200
+        assert response.json()[0]["title"] == expected_title
+        assert set(response.json()[0]) == {"id", "title", "subtitle"}
+
+    limited = auth_client.get(
+        "/api/people/search",
+        params={"q": "Persona", "limit": 2},
+    )
+    assert limited.status_code == 200
+    assert [item["title"] for item in limited.json()] == ["Persona #1", "Persona #2"]
+    assert auth_client.get("/api/people/search", params={"q": "   "}).status_code == 422
+    assert auth_client.get("/api/people/search", params={"q": "Persona", "limit": 51}).status_code == 422
+    assert auth_client.get("/api/people/search", params={"q": "Persona"}).status_code == 200
+
+    global_search = auth_client.get("/api/search", params={"q": "Persona #1"})
+    assert global_search.status_code == 200
+    assert any(item["entity_type"] == "person" for item in global_search.json())
+
+
 def test_place_address_normalization_validation_and_search(
     auth_client: httpx.Client,
 ) -> None:
@@ -271,7 +305,7 @@ def test_entity_metadata_is_flattened_from_pullable_and_touched_on_update(
     )
 
 
-def test_related_content_changes_touch_only_the_endpoint_owner(
+def test_related_content_changes_touch_expected_entities(
     auth_client: httpx.Client, tmp_path: Path
 ) -> None:
     user = auth_client.get("/api/me").json()
@@ -313,7 +347,9 @@ def test_related_content_changes_touch_only_the_endpoint_owner(
         person_before_places["updated_at"]
     )
     assert person_after_places["updated_by"] == user["id"]
-    assert place_after_link["updated_at"] == place_before_link["updated_at"]
+    assert parse_timestamp(place_after_link["updated_at"]) > parse_timestamp(
+        place_before_link["updated_at"]
+    )
 
     event_before_media = event_after_participants
     image = tmp_path / "metadata.png"
@@ -330,6 +366,88 @@ def test_related_content_changes_touch_only_the_endpoint_owner(
         event_before_media["updated_at"]
     )
     assert event_after_media["updated_by"] == user["id"]
+
+
+def test_person_place_replacement_from_both_sides_tracks_changed_counterparts(
+    auth_client: httpx.Client,
+) -> None:
+    people = auth_client.get("/api/people").json()
+    places = auth_client.get("/api/places").json()
+    person_one, person_two = people[:2]
+    place_one, place_two = places[:2]
+
+    added = auth_client.put(
+        f"/api/people/{person_one['id']}/places",
+        json=[{"place_id": place_one["id"], "motivation": "Prima motivazione"}],
+    )
+    assert added.status_code == 200
+    first_person_update = auth_client.get(f"/api/people/{person_one['id']}").json()["updated_at"]
+    first_place_update = auth_client.get(f"/api/places/{place_one['id']}").json()["updated_at"]
+    untouched_place_update = auth_client.get(f"/api/places/{place_two['id']}").json()["updated_at"]
+
+    unchanged = auth_client.put(
+        f"/api/people/{person_one['id']}/places",
+        json=[{"place_id": place_one["id"], "motivation": "Prima motivazione"}],
+    )
+    assert unchanged.status_code == 200
+    assert parse_timestamp(auth_client.get(f"/api/people/{person_one['id']}").json()["updated_at"]) > parse_timestamp(first_person_update)
+    assert auth_client.get(f"/api/places/{place_one['id']}").json()["updated_at"] == first_place_update
+    assert auth_client.get(f"/api/places/{place_two['id']}").json()["updated_at"] == untouched_place_update
+
+    replaced = auth_client.put(
+        f"/api/places/{place_one['id']}/people",
+        json=[{"person_id": person_two["id"], "motivation": "Nuovo collegamento"}],
+    )
+    assert replaced.status_code == 200
+    assert replaced.json()[0]["person_id"] == person_two["id"]
+    assert replaced.json()[0]["motivation"] == "Nuovo collegamento"
+
+    duplicate = auth_client.put(
+        f"/api/places/{place_one['id']}/people",
+        json=[
+            {"person_id": person_two["id"], "motivation": None},
+            {"person_id": person_two["id"], "motivation": None},
+        ],
+    )
+    assert duplicate.status_code == 422
+    missing = auth_client.put(
+        f"/api/places/{place_one['id']}/people",
+        json=[{"person_id": 999999, "motivation": None}],
+    )
+    assert missing.status_code == 422
+
+    from app.database import SessionLocal
+    from app.models import ActivityAction, ActivityLog, PersonPlace, Pullable
+
+    with SessionLocal() as db:
+        link = db.query(PersonPlace).filter_by(place_id=place_one["id"]).one()
+        place_log = (
+            db.query(ActivityLog)
+            .filter_by(entity_id=place_one["id"], action=ActivityAction.REPLACE_PEOPLE.value)
+            .order_by(ActivityLog.id.desc())
+            .first()
+        )
+        removed_person_log = (
+            db.query(ActivityLog)
+            .filter_by(entity_id=person_one["id"], action=ActivityAction.REPLACE_PLACES.value)
+            .order_by(ActivityLog.id.desc())
+            .first()
+        )
+        added_person_log = (
+            db.query(ActivityLog)
+            .filter_by(entity_id=person_two["id"], action=ActivityAction.REPLACE_PLACES.value)
+            .order_by(ActivityLog.id.desc())
+            .first()
+        )
+        assert place_log is not None
+        assert removed_person_log is not None
+        assert added_person_log is not None
+        assert link.created_at == link.updated_at == place_log.occurred_at
+        assert removed_person_log.occurred_at == place_log.occurred_at
+        assert added_person_log.occurred_at == place_log.occurred_at
+        assert db.get(Pullable, place_one["id"]).updated_at == place_log.occurred_at
+        assert db.get(Pullable, person_one["id"]).updated_at == place_log.occurred_at
+        assert db.get(Pullable, person_two["id"]).updated_at == place_log.occurred_at
 
 
 def test_delete_restricts_places_and_epochs_used_by_events(auth_client: httpx.Client) -> None:

@@ -399,6 +399,11 @@ class PlacePersonOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class PlacePersonIn(BaseModel):
+    person_id: int
+    motivation: str | None = None
+
+
 class GroupPeopleUpdate(BaseModel):
     person_ids: list[int]
 
@@ -409,6 +414,12 @@ class GroupEpochsUpdate(BaseModel):
 
 class SearchResult(BaseModel):
     entity_type: EntityType
+    id: int
+    title: str
+    subtitle: str | None = None
+
+
+class EntitySearchResult(BaseModel):
     id: int
     title: str
     subtitle: str | None = None
