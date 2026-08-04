@@ -4,6 +4,7 @@ ENV_FILE ?= $(CURDIR)/.env
 HOST ?= 127.0.0.1
 PORT ?= 8000
 API_DELAY_MS ?= 0
+SEED_PROFILE ?= demo
 
 export PATH := $(VENV)/bin:$(PATH)
 
@@ -19,7 +20,8 @@ help:
 		'  make install              Create .venv and install development dependencies' \
 		'  make migrate              Apply all database migrations' \
 		'  make revision MESSAGE=""  Generate a migration after model changes' \
-		'  make seed                 Load demo users and content' \
+		'  make seed                 Load the small anonymized demo dataset' \
+		'  make SEED_PROFILE=stress seed  Load the large stress dataset' \
 		'  make user                 Interactively create or update a fixed account' \
 		'  make owner USERNAME=name  Assign or transfer the protected Owner role' \
 		'  make maintenance-schedule MINUTES=15 MESSAGE="..."' \
@@ -33,7 +35,7 @@ help:
 		'  make run CMD="<command>"  Run any command with variables from .env' \
 		'  make clean                Remove reproducible caches and build output' \
 		'' \
-		'Overrides: ENV_FILE=<path> HOST=<host> PORT=<port> API_DELAY_MS=<0-60000>'
+		'Overrides: ENV_FILE=<path> HOST=<host> PORT=<port> API_DELAY_MS=<0-60000> SEED_PROFILE=<demo|stress>'
 
 $(PYTHON):
 	python3 -m venv $(VENV)
@@ -57,7 +59,7 @@ revision: check-env
 	$(DOTENV) $(PYTHON) -m alembic revision --autogenerate -m "$(MESSAGE)"
 
 seed: migrate
-	$(DOTENV) $(PYTHON) -m app.seed
+	$(DOTENV) $(PYTHON) -m app.seed --profile "$(SEED_PROFILE)"
 
 user: migrate
 	$(DOTENV) $(PYTHON) -m app.manage_users

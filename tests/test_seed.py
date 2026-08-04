@@ -31,7 +31,14 @@ from app.models import (
     UserSession,
 )
 from app.security import verify_password
-from app.seed import DEMO_PASSWORD, SeedDataError, seed_demo_data, seed_test_data
+from app.seed import (
+    DEMO_PASSWORD,
+    SeedDataError,
+    StressSeedScale,
+    seed_demo_data,
+    seed_stress_data,
+    seed_test_data,
+)
 from app.partial_dates import PartialDate, event_epoch_conflict
 
 
@@ -330,6 +337,146 @@ def test_demo_seed_rejects_existing_media_and_cleans_up_after_failure(
         assert not failed_media.exists()
         assert db.query(UserAccount).count() == 0
         assert db.query(Pullable).count() == 0
+
+
+def test_stress_seed_covers_scale_boundaries_and_relationships(tmp_path: Path) -> None:
+    media_dir = tmp_path / "stress-media"
+    now = datetime(2026, 7, 19, 12, 0, tzinfo=timezone.utc)
+    scale = StressSeedScale(
+        people=252,
+        places=212,
+        epochs=212,
+        events=252,
+        groups=212,
+        media=20,
+    )
+    with database_session(tmp_path, "stress.sqlite") as db:
+        seed_stress_data(db, media_dir=media_dir, now=now, scale=scale)
+
+        assert db.query(UserAccount).count() == 8
+        assert db.query(UserAccount).filter_by(is_owner=True).one().username == "admin"
+        assert db.query(UserAccount).filter_by(username="utente6").one().is_active is False
+        assert max(len(user.display_name) for user in db.query(UserAccount).all()) == 160
+        assert db.query(Person).count() == scale.people
+        assert db.query(Place).count() == scale.places
+        assert db.query(Epoch).count() == scale.epochs
+        assert db.query(Event).count() == scale.events
+        assert db.query(SocialGroup).count() == scale.groups
+        assert db.query(Pullable).count() == sum(
+            (scale.people, scale.places, scale.epochs, scale.events, scale.groups)
+        )
+
+        assert db.query(PersonPlace).count() == scale.people * 4
+        assert db.query(PersonEvent).count() == scale.events * 6
+        assert db.query(SocialGroupPerson).count() == sum(
+            min(scale.people, 5 + index % 46)
+            for index in range(scale.groups - 1)
+        )
+        assert db.query(SocialGroupEpoch).count() == sum(
+            min(scale.epochs, 1 + index % 10)
+            for index in range(scale.groups - 1)
+        )
+        empty_group = db.query(SocialGroup).order_by(SocialGroup.id.desc()).first()
+        assert empty_group is not None
+        assert db.query(SocialGroupPerson).filter_by(group_id=empty_group.id).count() == 0
+        assert db.query(SocialGroupEpoch).filter_by(group_id=empty_group.id).count() == 0
+
+        assert max(len(person.alias) for person in db.query(Person).all()) == 255
+        assert max(len(place.name) for place in db.query(Place).all()) == 255
+        assert max(len(place.address or "") for place in db.query(Place).all()) == 500
+        assert max(len(epoch.name) for epoch in db.query(Epoch).all()) == 255
+        assert max(len(event.title) for event in db.query(Event).all()) == 255
+        assert max(len(group.name) for group in db.query(SocialGroup).all()) == 255
+        assert max(len(link.role or "") for link in db.query(PersonEvent).all()) == 255
+        assert max(
+            len(link.motivation or "")
+            for model in (PersonPlace, PersonEvent)
+            for link in db.query(model).all()
+        ) > 20_000
+
+        for model in (Person, Place, Epoch, Event, SocialGroup):
+            descriptions = [
+                value for (value,) in db.query(model.description).all() if value is not None
+            ]
+            assert db.query(model).filter(model.description.is_(None)).count() > 0
+            assert min(map(len, descriptions)) < 200
+            assert max(map(len, descriptions)) > 20_000
+            assert any("\n" in value for value in descriptions)
+            assert any("漢字" in value for value in descriptions)
+
+        assert {person.sex for person in db.query(Person).all()} == {
+            value.value for value in Sex
+        }
+        assert {person.connotation for person in db.query(Person).all()} == {
+            value.value for value in Connotation
+        }
+        assert {pullable.rarity for pullable in db.query(Pullable).all()} == {
+            0.5,
+            1.0,
+            1.5,
+            2.0,
+            3.0,
+        }
+        assert all(
+            event_epoch_conflict(
+                PartialDate(event.year, event.month, event.day),
+                PartialDate(
+                    event.epoch.start_year,
+                    event.epoch.start_month,
+                    event.epoch.start_day,
+                ),
+                PartialDate(
+                    event.epoch.end_year,
+                    event.epoch.end_month,
+                    event.epoch.end_day,
+                ),
+            )
+            is None
+            for event in db.query(Event).all()
+        )
+
+        assets = db.query(MediaAsset).all()
+        assert len(assets) == scale.media
+        assert len({asset.pullable_id for asset in assets}) == 15
+        assert all(Path(asset.disk_path).is_file() for asset in assets)
+        assert len(list(media_dir.glob("*.svg"))) == scale.media
+        assert db.query(ActivityLog).count() == (
+            db.query(Pullable).count()
+            + scale.people
+            + scale.events
+            + (scale.groups - 1) * 2
+            + scale.media
+        )
+        assert db.query(SecurityEventLog).count() == 9
+
+        person_without_media = (
+            db.query(Person)
+            .filter(
+                ~Person.id.in_(db.query(MediaAsset.pullable_id))
+            )
+            .order_by(Person.id)
+            .first()
+        )
+        assert person_without_media is not None
+        person_log = (
+            db.query(ActivityLog)
+            .filter_by(
+                entity_type="person",
+                entity_id=person_without_media.id,
+                action=ActivityAction.REPLACE_PLACES.value,
+            )
+            .one()
+        )
+        assert all(
+            link.created_at == link.updated_at == person_log.occurred_at
+            for link in db.query(PersonPlace)
+            .filter_by(person_id=person_without_media.id)
+            .all()
+        )
+        assert person_without_media.updated_at == person_log.occurred_at
+
+        with pytest.raises(SeedDataError, match="requires an empty database"):
+            seed_stress_data(db, media_dir=media_dir, now=now, scale=scale)
 
 
 def test_minimal_test_seed_remains_small_and_has_no_history(tmp_path: Path) -> None:

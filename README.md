@@ -86,7 +86,15 @@ Requirements are Python 3.11 or newer and GNU Make.
 
    The demo contains 8 generic accounts, 24 people, 12 places, 5 epochs, 40 events, 6 social groups, relationships, activity history, and generated sample images. Descriptions deliberately range from missing or very short text to multi-thousand-character content so compact cards and detail views can be exercised. The usernames are `admin`, `admin2`, and `utente1` through `utente6`; they all use the development-only password `demo-password-123`. The final account is inactive, `admin` and `admin2` are administrators, and `admin` is the protected Owner.
 
-   The seed intentionally refuses to mix demo records with an existing database or non-empty media directory. To rebuild the disposable local demo, stop the server and run:
+   For pagination, query, and layout stress testing, load the separate large profile instead:
+
+   ```bash
+   make SEED_PROFILE=stress seed
+   ```
+
+   It keeps the same eight accounts and creates 1,500 people, 300 places, 60 epochs, 3,000 events, 200 Cerchie, 30,330 relationship rows, more than 10,000 content-activity rows, and 300 generated images. Its deterministic text covers empty, short, multiline, Unicode, long unbroken, and boundary-length values. Generation takes longer and consumes substantially more disk space than the normal demo.
+
+   Both profiles intentionally refuse to mix generated records with an existing database or non-empty media directory. To rebuild a disposable local instance, stop the server and run:
 
    ```bash
    rm -f wiki_parchino.db
@@ -94,6 +102,8 @@ Requirements are Python 3.11 or newer and GNU Make.
    make migrate
    make seed
    ```
+
+   Replace the final command with `make SEED_PROFILE=stress seed` when the large dataset is required. These generated credentials and datasets are strictly for local development and must never be loaded on a production server.
 
    For non-demo instances, create each fixed account through a hidden password prompt instead:
 
@@ -245,7 +255,7 @@ Run the complete backend suite:
 make test
 ```
 
-The suite uses a small isolated seed rather than the larger manual demo dataset. It covers authentication and session reuse, maintenance enforcement and Telegram delivery failures, administrator authorization and account safeguards, account deactivation, activity/security history, paginated profile activity, password changes, CRUD, collection filtering/sorting/pagination, database constraints and query indexes, hard-delete behavior, relationships, media IDs and storage, search, pulls, demo seeding, and fresh Alembic migrations.
+The API suite uses a small isolated fixture so ordinary test runs remain fast. Dedicated seed tests validate both the normal demo and a reduced stress scale, including boundary-length text, relationship volume, activity consistency, and media generation. The remaining suite covers authentication and session reuse, maintenance enforcement and Telegram delivery failures, administrator authorization and account safeguards, account deactivation, activity/security history, paginated profile activity, password changes, CRUD, collection filtering/sorting/pagination, database constraints and query indexes, hard-delete behavior, relationships, media IDs and storage, search, pulls, and fresh Alembic migrations.
 
 ## Deployment
 

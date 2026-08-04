@@ -3,11 +3,22 @@ from __future__ import annotations
 from datetime import timedelta
 
 import httpx
-from sqlalchemy import event as sqlalchemy_event
+from sqlalchemy import event as sqlalchemy_event, select
 
 from app import database
 from app.api.admin import get_summary, hydrate_activity
-from app.models import ActivityAction, ActivityLog, EntityType, Person, UserAccount
+from app.api.entities import event_date_ordering
+from app.models import (
+    ActivityAction,
+    ActivityLog,
+    EntityType,
+    Epoch,
+    Event,
+    Person,
+    Place,
+    Pullable,
+    UserAccount,
+)
 from app.security import utcnow
 
 
@@ -53,6 +64,121 @@ def test_collection_envelopes_pagination_filters_and_sorting(
 
     assert auth_client.get("/api/people", params={"page_size": 101}).status_code == 422
     assert auth_client.get("/api/events", params={"sort": "unsupported"}).status_code == 422
+
+
+def test_event_date_sort_uses_earliest_date_and_keeps_unknown_last(
+    auth_client: httpx.Client,
+) -> None:
+    place_id = auth_client.get("/api/places", params={"page_size": 1}).json()["items"][0]["id"]
+    epoch_id = auth_client.post(
+        "/api/epochs",
+        json={"name": "Epoca ordinamento date", "description": None, "rarity": 1.0},
+    ).json()["id"]
+    created: list[tuple[int, str]] = []
+    dates = (
+        ("Data sconosciuta", None, None, None),
+        ("Solo anno", 2025, None, None),
+        ("Anno e mese equivalenti", 2025, 1, None),
+        ("Data completa equivalente", 2025, 1, 1),
+        ("Data successiva", 2025, 2, 1),
+    )
+    for title, year, month, day in dates:
+        response = auth_client.post(
+            "/api/events",
+            json={
+                "place_id": place_id,
+                "epoch_id": epoch_id,
+                "title": title,
+                "description": None,
+                "year": year,
+                "month": month,
+                "day": day,
+                "rarity": 1.0,
+            },
+        )
+        assert response.status_code == 201
+        created.append((response.json()["id"], title))
+
+    created_ids = {item_id for item_id, _ in created}
+
+    def sorted_created(order: str) -> list[dict]:
+        response = auth_client.get(
+            "/api/events",
+            params={
+                "epoch_id": epoch_id,
+                "sort": "date",
+                "order": order,
+                "page_size": 100,
+            },
+        )
+        assert response.status_code == 200
+        return [item for item in response.json()["items"] if item["id"] in created_ids]
+
+    ascending = sorted_created("asc")
+    assert [item["title"] for item in ascending] == [
+        "Solo anno",
+        "Anno e mese equivalenti",
+        "Data completa equivalente",
+        "Data successiva",
+        "Data sconosciuta",
+    ]
+    equivalent_ids = [item["id"] for item in ascending[:3]]
+    assert equivalent_ids == sorted(equivalent_ids)
+
+    descending = sorted_created("desc")
+    assert [item["title"] for item in descending] == [
+        "Data successiva",
+        "Data completa equivalente",
+        "Anno e mese equivalenti",
+        "Solo anno",
+        "Data sconosciuta",
+    ]
+    assert [item["id"] for item in descending[1:4]] == sorted(equivalent_ids, reverse=True)
+
+
+def test_event_date_sort_matches_existing_indexes(
+    auth_client: httpx.Client,
+) -> None:
+    expected_indexes = {
+        None: "ix_event_date_id",
+        "place": "ix_event_place_date_id",
+        "epoch": "ix_event_epoch_date_id",
+    }
+    filters = {
+        None: None,
+        "place": Event.place_id == 1,
+        "epoch": Event.epoch_id == 1,
+    }
+
+    for filter_name, index_name in expected_indexes.items():
+        for order in ("asc", "desc"):
+            statement = (
+                select(Event.id)
+                .join(Pullable, Pullable.id == Event.id)
+                .join(Place, Place.id == Event.place_id)
+                .join(Epoch, Epoch.id == Event.epoch_id)
+            )
+            if filters[filter_name] is not None:
+                statement = statement.where(filters[filter_name])
+            statement = statement.order_by(*event_date_ordering(order)).limit(18)
+            parameterized_sql = str(statement.compile(database.engine))
+            assert "coalesce(event.month, ?)" not in parameterized_sql
+            assert "coalesce(event.day, ?)" not in parameterized_sql
+            compiled = statement.compile(
+                database.engine,
+                compile_kwargs={"literal_binds": True},
+            )
+            sql = str(compiled)
+            assert "coalesce(event.month, 1)" in sql
+            assert "coalesce(event.day, 1)" in sql
+
+            with database.engine.connect() as connection:
+                plan = connection.exec_driver_sql(
+                    f"EXPLAIN QUERY PLAN {sql}"
+                ).all()
+            details = [row[3] for row in plan]
+            assert any(index_name in detail for detail in details)
+            assert not any("TEMP B-TREE FOR ORDER BY" in detail.upper() for detail in details)
 
 
 def test_pullable_counts_recent_and_global_search_pagination(

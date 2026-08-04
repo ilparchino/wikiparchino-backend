@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
-from sqlalchemy import case, func, or_, select
+from sqlalchemy import case, func, literal_column, or_, select
 from sqlalchemy.orm import Session, joinedload
 
 from app.api.deps import current_user
@@ -71,14 +71,12 @@ def ordered(expression, order: SortOrder, *, nulls_last: bool = False):
     return clause.nullslast() if nulls_last else clause
 
 
-def event_date_key():
-    return case(
-        (Event.year.is_(None), None),
-        else_=(
-            Event.year * 10000
-            + func.coalesce(Event.month, 1) * 100
-            + func.coalesce(Event.day, 1)
-        ),
+def event_date_ordering(order: SortOrder):
+    return (
+        ordered(Event.year, order, nulls_last=True),
+        ordered(func.coalesce(Event.month, literal_column("1")), order),
+        ordered(func.coalesce(Event.day, literal_column("1")), order),
+        ordered(Event.id, order),
     )
 
 
@@ -428,12 +426,14 @@ def list_events(
         query = query.filter(Event.year == year)
     expressions = {
         "title": Event.title.collate("NOCASE"),
-        "date": event_date_key(),
         "created_at": Pullable.created_at,
         "updated_at": Pullable.updated_at,
         "rarity": Pullable.rarity,
     }
-    query = query.order_by(ordered(expressions[sort], order, nulls_last=sort == "date"), ordered(Event.id, order))
+    if sort == "date":
+        query = query.order_by(*event_date_ordering(order))
+    else:
+        query = query.order_by(ordered(expressions[sort], order), ordered(Event.id, order))
     return paginate_query(query, page, page_size)
 
 
