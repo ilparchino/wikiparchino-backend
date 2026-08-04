@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from fastapi import FastAPI
-from fastapi import Depends
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import (
@@ -11,16 +10,14 @@ from app.api import (
     maintenance,
     media,
     profile,
+    pullables,
     pulls,
     relationships,
     search,
 )
-from app.api.deps import current_user
 from app.config import get_settings
 from app.development_delay_middleware import DevelopmentDelayMiddleware
 from app.maintenance_middleware import MaintenanceMiddleware
-from app.models import UserAccount
-from app.schemas import UserOut
 
 
 def create_app() -> FastAPI:
@@ -47,6 +44,7 @@ def create_app() -> FastAPI:
     app.include_router(maintenance.router, prefix="/api")
     # Static collection search routes must precede routes such as /people/{id}.
     app.include_router(search.router, prefix="/api")
+    app.include_router(pullables.router, prefix="/api")
     app.include_router(entities.router, prefix="/api")
     app.include_router(relationships.router, prefix="/api")
     app.include_router(media.router, prefix="/api")
@@ -57,10 +55,6 @@ def create_app() -> FastAPI:
     @app.get("/api/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}
-
-    @app.get("/api/me", response_model=UserOut)
-    def me(user: UserAccount = Depends(current_user)) -> UserAccount:
-        return user
 
     return app
 

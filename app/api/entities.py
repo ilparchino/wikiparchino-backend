@@ -1,10 +1,13 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
-from sqlalchemy import func
+from typing import Literal
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from sqlalchemy import case, func, or_, select
 from sqlalchemy.orm import Session, joinedload
 
 from app.api.deps import current_user
+from app.api.pagination import paginate_query
 from app.api.utils import (
     active_or_404,
     create_pullable,
@@ -18,11 +21,14 @@ from app.database import get_db
 from app.media_storage import commit_staged_deletion
 from app.models import (
     ActivityAction,
+    Connotation,
     EntityType,
     Epoch,
     Event,
     Person,
     Place,
+    Pullable,
+    Sex,
     SocialGroup,
     SocialGroupEpoch,
     SocialGroupPerson,
@@ -41,6 +47,7 @@ from app.schemas import (
     GroupOut,
     GroupSummaryOut,
     GroupUpdate,
+    Page,
     PersonCreate,
     PersonOut,
     PersonUpdate,
@@ -50,6 +57,68 @@ from app.schemas import (
 )
 
 router = APIRouter(tags=["entities"])
+
+SortOrder = Literal["asc", "desc"]
+
+
+def text_term(value: str | None) -> str | None:
+    normalized = value.strip() if value else ""
+    return f"%{normalized}%" if normalized else None
+
+
+def ordered(expression, order: SortOrder, *, nulls_last: bool = False):
+    clause = expression.asc() if order == "asc" else expression.desc()
+    return clause.nullslast() if nulls_last else clause
+
+
+def event_date_key():
+    return case(
+        (Event.year.is_(None), None),
+        else_=(
+            Event.year * 10000
+            + func.coalesce(Event.month, 1) * 100
+            + func.coalesce(Event.day, 1)
+        ),
+    )
+
+
+def epoch_start_key():
+    return case(
+        (Epoch.start_year.is_(None), None),
+        else_=(
+            Epoch.start_year * 10000
+            + func.coalesce(Epoch.start_month, 1) * 100
+            + func.coalesce(Epoch.start_day, 1)
+        ),
+    )
+
+
+def epoch_end_key():
+    leap_february = case(
+        (
+            or_(
+                Epoch.end_year % 400 == 0,
+                (Epoch.end_year % 4 == 0) & (Epoch.end_year % 100 != 0),
+            ),
+            29,
+        ),
+        else_=28,
+    )
+    last_day = case(
+        (Epoch.end_day.is_not(None), Epoch.end_day),
+        (Epoch.end_month.is_(None), 31),
+        (Epoch.end_month == 2, leap_february),
+        (Epoch.end_month.in_((4, 6, 9, 11)), 30),
+        else_=31,
+    )
+    return case(
+        (Epoch.end_year.is_(None), None),
+        else_=(
+            Epoch.end_year * 10000
+            + func.coalesce(Epoch.end_month, 12) * 100
+            + last_day
+        ),
+    )
 
 
 def epoch_start(epoch: Epoch | EpochCreate | EpochUpdate) -> PartialDate:
@@ -91,9 +160,36 @@ def split_rarity(payload) -> tuple[dict, float]:
     return data, rarity
 
 
-@router.get("/people", response_model=list[PersonOut])
-def list_people(user: UserAccount = Depends(current_user), db: Session = Depends(get_db)) -> list[Person]:
-    return db.query(Person).options(joinedload(Person.pullable)).order_by(Person.alias).all()
+@router.get("/people", response_model=Page[PersonOut])
+def list_people(
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=18, ge=1, le=100),
+    q: str | None = Query(default=None, max_length=120),
+    sex: Sex | None = Query(default=None),
+    connotation: Connotation | None = Query(default=None),
+    sort: Literal["alias", "name", "surname", "created_at", "updated_at", "rarity"] = "alias",
+    order: SortOrder = "asc",
+    user: UserAccount = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> Page[PersonOut]:
+    query = db.query(Person).join(Pullable).options(joinedload(Person.pullable))
+    term = text_term(q)
+    if term:
+        query = query.filter(or_(Person.alias.ilike(term), Person.name.ilike(term), Person.surname.ilike(term), Person.description.ilike(term)))
+    if sex:
+        query = query.filter(Person.sex == sex.value)
+    if connotation:
+        query = query.filter(Person.connotation == connotation.value)
+    expressions = {
+        "alias": Person.alias.collate("NOCASE"),
+        "name": Person.name.collate("NOCASE"),
+        "surname": Person.surname.collate("NOCASE"),
+        "created_at": Pullable.created_at,
+        "updated_at": Pullable.updated_at,
+        "rarity": Pullable.rarity,
+    }
+    query = query.order_by(ordered(expressions[sort], order, nulls_last=sort in {"name", "surname"}), ordered(Person.id, order))
+    return paginate_query(query, page, page_size)
 
 
 @router.post("/people", response_model=PersonOut, status_code=status.HTTP_201_CREATED)
@@ -139,9 +235,29 @@ def delete_person(person_id: int, user: UserAccount = Depends(current_user), db:
     commit_staged_deletion(db, staged_deletion)
 
 
-@router.get("/places", response_model=list[PlaceOut])
-def list_places(user: UserAccount = Depends(current_user), db: Session = Depends(get_db)) -> list[Place]:
-    return db.query(Place).options(joinedload(Place.pullable)).order_by(Place.name).all()
+@router.get("/places", response_model=Page[PlaceOut])
+def list_places(
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=18, ge=1, le=100),
+    q: str | None = Query(default=None, max_length=120),
+    sort: Literal["name", "address", "created_at", "updated_at", "rarity"] = "name",
+    order: SortOrder = "asc",
+    user: UserAccount = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> Page[PlaceOut]:
+    query = db.query(Place).join(Pullable).options(joinedload(Place.pullable))
+    term = text_term(q)
+    if term:
+        query = query.filter(or_(Place.name.ilike(term), Place.address.ilike(term), Place.description.ilike(term)))
+    expressions = {
+        "name": Place.name.collate("NOCASE"),
+        "address": Place.address.collate("NOCASE"),
+        "created_at": Pullable.created_at,
+        "updated_at": Pullable.updated_at,
+        "rarity": Pullable.rarity,
+    }
+    query = query.order_by(ordered(expressions[sort], order, nulls_last=sort == "address"), ordered(Place.id, order))
+    return paginate_query(query, page, page_size)
 
 
 @router.post("/places", response_model=PlaceOut, status_code=status.HTTP_201_CREATED)
@@ -189,9 +305,30 @@ def delete_place(place_id: int, user: UserAccount = Depends(current_user), db: S
     commit_staged_deletion(db, staged_deletion)
 
 
-@router.get("/epochs", response_model=list[EpochOut])
-def list_epochs(user: UserAccount = Depends(current_user), db: Session = Depends(get_db)) -> list[Epoch]:
-    return db.query(Epoch).options(joinedload(Epoch.pullable)).order_by(Epoch.name).all()
+@router.get("/epochs", response_model=Page[EpochOut])
+def list_epochs(
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=18, ge=1, le=100),
+    q: str | None = Query(default=None, max_length=120),
+    sort: Literal["name", "start_date", "end_date", "created_at", "updated_at", "rarity"] = "name",
+    order: SortOrder = "asc",
+    user: UserAccount = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> Page[EpochOut]:
+    query = db.query(Epoch).join(Pullable).options(joinedload(Epoch.pullable))
+    term = text_term(q)
+    if term:
+        query = query.filter(or_(Epoch.name.ilike(term), Epoch.description.ilike(term)))
+    expressions = {
+        "name": Epoch.name.collate("NOCASE"),
+        "start_date": epoch_start_key(),
+        "end_date": epoch_end_key(),
+        "created_at": Pullable.created_at,
+        "updated_at": Pullable.updated_at,
+        "rarity": Pullable.rarity,
+    }
+    query = query.order_by(ordered(expressions[sort], order, nulls_last=sort in {"start_date", "end_date"}), ordered(Epoch.id, order))
+    return paginate_query(query, page, page_size)
 
 
 @router.post("/epochs", response_model=EpochOut, status_code=status.HTTP_201_CREATED)
@@ -260,14 +397,44 @@ def delete_epoch(epoch_id: int, user: UserAccount = Depends(current_user), db: S
     commit_staged_deletion(db, staged_deletion)
 
 
-@router.get("/events", response_model=list[EventOut])
-def list_events(user: UserAccount = Depends(current_user), db: Session = Depends(get_db)) -> list[Event]:
-    return (
+@router.get("/events", response_model=Page[EventOut])
+def list_events(
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=18, ge=1, le=100),
+    q: str | None = Query(default=None, max_length=120),
+    place_id: int | None = Query(default=None, ge=1),
+    epoch_id: int | None = Query(default=None, ge=1),
+    year: int | None = Query(default=None, ge=1900),
+    sort: Literal["title", "date", "created_at", "updated_at", "rarity"] = "date",
+    order: SortOrder = "desc",
+    user: UserAccount = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> Page[EventOut]:
+    query = (
         db.query(Event)
+        .join(Pullable, Pullable.id == Event.id)
+        .join(Place, Place.id == Event.place_id)
+        .join(Epoch, Epoch.id == Event.epoch_id)
         .options(joinedload(Event.pullable), joinedload(Event.place).joinedload(Place.pullable), joinedload(Event.epoch).joinedload(Epoch.pullable))
-        .order_by(Event.year.desc().nullslast(), Event.month.desc().nullslast(), Event.day.desc().nullslast(), Event.title)
-        .all()
     )
+    term = text_term(q)
+    if term:
+        query = query.filter(or_(Event.title.ilike(term), Event.description.ilike(term), Place.name.ilike(term), Epoch.name.ilike(term)))
+    if place_id:
+        query = query.filter(Event.place_id == place_id)
+    if epoch_id:
+        query = query.filter(Event.epoch_id == epoch_id)
+    if year:
+        query = query.filter(Event.year == year)
+    expressions = {
+        "title": Event.title.collate("NOCASE"),
+        "date": event_date_key(),
+        "created_at": Pullable.created_at,
+        "updated_at": Pullable.updated_at,
+        "rarity": Pullable.rarity,
+    }
+    query = query.order_by(ordered(expressions[sort], order, nulls_last=sort == "date"), ordered(Event.id, order))
+    return paginate_query(query, page, page_size)
 
 
 @router.post("/events", response_model=EventOut, status_code=status.HTTP_201_CREATED)
@@ -319,32 +486,67 @@ def delete_event(event_id: int, user: UserAccount = Depends(current_user), db: S
     commit_staged_deletion(db, staged_deletion)
 
 
-@router.get("/groups", response_model=list[GroupSummaryOut])
+@router.get("/groups", response_model=Page[GroupSummaryOut])
 def list_groups(
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=18, ge=1, le=100),
+    q: str | None = Query(default=None, max_length=120),
+    sort: Literal["name", "people_count", "epoch_count", "created_at", "updated_at", "rarity"] = "name",
+    order: SortOrder = "asc",
     user: UserAccount = Depends(current_user),
     db: Session = Depends(get_db),
-) -> list[GroupSummaryOut]:
-    rows = (
+) -> Page[GroupSummaryOut]:
+    people_counts = (
+        select(
+            SocialGroupPerson.group_id.label("group_id"),
+            func.count(SocialGroupPerson.person_id).label("count"),
+        )
+        .group_by(SocialGroupPerson.group_id)
+        .subquery()
+    )
+    epoch_counts = (
+        select(
+            SocialGroupEpoch.group_id.label("group_id"),
+            func.count(SocialGroupEpoch.epoch_id).label("count"),
+        )
+        .group_by(SocialGroupEpoch.group_id)
+        .subquery()
+    )
+    people_count = func.coalesce(people_counts.c.count, 0)
+    epoch_count = func.coalesce(epoch_counts.c.count, 0)
+    query = (
         db.query(
             SocialGroup,
-            func.count(func.distinct(SocialGroupPerson.person_id)),
-            func.count(func.distinct(SocialGroupEpoch.epoch_id)),
+            people_count,
+            epoch_count,
         )
-        .outerjoin(SocialGroupPerson, SocialGroupPerson.group_id == SocialGroup.id)
-        .outerjoin(SocialGroupEpoch, SocialGroupEpoch.group_id == SocialGroup.id)
+        .join(Pullable, Pullable.id == SocialGroup.id)
+        .outerjoin(people_counts, people_counts.c.group_id == SocialGroup.id)
+        .outerjoin(epoch_counts, epoch_counts.c.group_id == SocialGroup.id)
         .options(joinedload(SocialGroup.pullable))
-        .group_by(SocialGroup.id)
-        .order_by(SocialGroup.name)
-        .all()
     )
-    return [
-        GroupSummaryOut(
-            **GroupOut.model_validate(group).model_dump(),
-            people_count=people_count,
-            epoch_count=epoch_count,
-        )
-        for group, people_count, epoch_count in rows
-    ]
+    term = text_term(q)
+    if term:
+        query = query.filter(or_(SocialGroup.name.ilike(term), SocialGroup.description.ilike(term)))
+    expressions = {
+        "name": SocialGroup.name.collate("NOCASE"),
+        "people_count": people_count,
+        "epoch_count": epoch_count,
+        "created_at": Pullable.created_at,
+        "updated_at": Pullable.updated_at,
+        "rarity": Pullable.rarity,
+    }
+    query = query.order_by(ordered(expressions[sort], order), ordered(SocialGroup.id, order))
+    return paginate_query(
+        query,
+        page,
+        page_size,
+        lambda row: GroupSummaryOut(
+            **GroupOut.model_validate(row[0]).model_dump(),
+            people_count=row[1],
+            epoch_count=row[2],
+        ),
+    )
 
 
 @router.post("/groups", response_model=GroupOut, status_code=status.HTTP_201_CREATED)
@@ -372,13 +574,18 @@ def create_group(
     return item
 
 
-@router.get("/groups/{group_id}", response_model=GroupOut)
+@router.get("/groups/{group_id}", response_model=GroupSummaryOut)
 def get_group(
     group_id: int,
     user: UserAccount = Depends(current_user),
     db: Session = Depends(get_db),
-) -> SocialGroup:
-    return active_or_404(db, SocialGroup, group_id)
+) -> GroupSummaryOut:
+    group = active_or_404(db, SocialGroup, group_id)
+    return GroupSummaryOut(
+        **GroupOut.model_validate(group).model_dump(),
+        people_count=db.query(SocialGroupPerson).filter(SocialGroupPerson.group_id == group_id).count(),
+        epoch_count=db.query(SocialGroupEpoch).filter(SocialGroupEpoch.group_id == group_id).count(),
+    )
 
 
 @router.put("/groups/{group_id}", response_model=GroupOut)

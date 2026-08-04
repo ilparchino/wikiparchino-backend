@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated, Literal
+from typing import Annotated, Generic, Literal, TypeVar
 
 from pydantic import AfterValidator, BaseModel, Field, field_validator, model_validator
 
@@ -19,6 +19,15 @@ NewPassword = Annotated[
     Field(min_length=MIN_PASSWORD_LENGTH, max_length=MAX_PASSWORD_LENGTH),
     AfterValidator(validate_new_password),
 ]
+
+PageItem = TypeVar("PageItem")
+
+
+class Page(BaseModel, Generic[PageItem]):
+    items: list[PageItem]
+    total: int
+    page: int
+    page_size: int
 
 
 class UserOut(BaseModel):
@@ -161,7 +170,7 @@ class ProfileActivityOut(BaseModel):
 
 class ProfileOut(BaseModel):
     user: UserOut
-    recent_activity: list[ProfileActivityOut]
+    activity: Page[ProfileActivityOut]
 
 
 class RarityMixin(BaseModel):
@@ -191,6 +200,7 @@ class PersonOut(PersonBase):
     updated_at: datetime
     created_by: int | None = None
     updated_by: int | None = None
+    media_ids: list[int]
 
     model_config = {"from_attributes": True}
 
@@ -227,6 +237,7 @@ class PlaceOut(PlaceBase):
     updated_at: datetime
     created_by: int | None = None
     updated_by: int | None = None
+    media_ids: list[int]
 
     model_config = {"from_attributes": True}
 
@@ -264,6 +275,7 @@ class EpochOut(EpochBase):
     updated_at: datetime
     created_by: int | None = None
     updated_by: int | None = None
+    media_ids: list[int]
 
     model_config = {"from_attributes": True}
 
@@ -300,6 +312,7 @@ class EventOut(EventBase):
     updated_at: datetime
     created_by: int | None = None
     updated_by: int | None = None
+    media_ids: list[int]
     place: PlaceOut | None = None
     epoch: EpochOut | None = None
 
@@ -325,6 +338,7 @@ class GroupOut(GroupBase):
     updated_at: datetime
     created_by: int | None = None
     updated_by: int | None = None
+    media_ids: list[int]
 
     model_config = {"from_attributes": True}
 
@@ -417,6 +431,21 @@ class SearchResult(BaseModel):
     id: int
     title: str
     subtitle: str | None = None
+
+
+class PullableCountsOut(BaseModel):
+    people: int
+    places: int
+    epochs: int
+    events: int
+    groups: int
+
+
+class RecentPullableOut(BaseModel):
+    entity_type: EntityType
+    id: int
+    title: str
+    created_at: datetime
 
 
 class EntitySearchResult(BaseModel):

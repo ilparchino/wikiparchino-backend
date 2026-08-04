@@ -11,14 +11,14 @@ def parse_timestamp(value: str) -> datetime:
 
 
 def test_auth_session_flow(client: httpx.Client) -> None:
-    assert client.get("/api/me").status_code == 401
+    assert client.get("/api/auth/me").status_code == 401
     response = client.post("/api/auth/login", json={"username": "admin", "password": "admin"})
     assert response.status_code == 200
     payload = response.json()
     assert payload["token_type"] == "bearer"
     assert payload["user"]["username"] == "admin"
     client.headers["Authorization"] = f"Bearer {payload['access_token']}"
-    assert client.get("/api/me").status_code == 200
+    assert client.get("/api/auth/me").status_code == 200
 
 
 def test_crud_hard_delete_and_search(auth_client: httpx.Client) -> None:
@@ -41,7 +41,7 @@ def test_crud_hard_delete_and_search(auth_client: httpx.Client) -> None:
 
     search = auth_client.get("/api/search", params={"q": "unica"})
     assert search.status_code == 200
-    assert any(item["id"] == person_id and item["entity_type"] == "person" for item in search.json())
+    assert any(item["id"] == person_id and item["entity_type"] == "person" for item in search.json()["items"])
 
     deleted = auth_client.delete(f"/api/people/{person_id}")
     assert deleted.status_code == 204
@@ -79,7 +79,7 @@ def test_collection_search_routes_are_typed_limited_and_ordered(
 
     global_search = auth_client.get("/api/search", params={"q": "Persona #1"})
     assert global_search.status_code == 200
-    assert any(item["entity_type"] == "person" for item in global_search.json())
+    assert any(item["entity_type"] == "person" for item in global_search.json()["items"])
 
 
 def test_place_address_normalization_validation_and_search(
@@ -100,7 +100,7 @@ def test_place_address_normalization_validation_and_search(
 
     found = auth_client.get("/api/search", params={"q": "Caffè"})
     assert found.status_code == 200
-    result = next(item for item in found.json() if item["id"] == place["id"])
+    result = next(item for item in found.json()["items"] if item["id"] == place["id"])
     assert result["entity_type"] == "place"
     assert result["subtitle"] == "Via del Caffè 10, Città"
 
@@ -157,7 +157,7 @@ def test_group_crud_relationships_search_pulls_and_activity(
 ) -> None:
     seeded = auth_client.get("/api/groups")
     assert seeded.status_code == 200
-    assert [(item["people_count"], item["epoch_count"]) for item in seeded.json()] == [
+    assert [(item["people_count"], item["epoch_count"]) for item in seeded.json()["items"]] == [
         (1, 1),
         (0, 0),
     ]
@@ -180,14 +180,14 @@ def test_group_crud_relationships_search_pulls_and_activity(
     assert search.status_code == 200
     assert any(
         item["entity_type"] == "group" and item["id"] == group_id
-        for item in search.json()
+        for item in search.json()["items"]
     )
     pull = auth_client.get("/api/pulls/random", params={"entity_type": "group"})
     assert pull.status_code == 200
     assert pull.json()["entity_type"] == "group"
 
-    people = auth_client.get("/api/people").json()
-    epochs = auth_client.get("/api/epochs").json()
+    people = auth_client.get("/api/people").json()["items"]
+    epochs = auth_client.get("/api/epochs").json()["items"]
     person_ids = [people[0]["id"], people[1]["id"]]
     epoch_ids = [epochs[0]["id"]]
     person_updated_at = people[0]["updated_at"]
@@ -268,8 +268,8 @@ def test_group_crud_relationships_search_pulls_and_activity(
 def test_entity_metadata_is_flattened_from_pullable_and_touched_on_update(
     auth_client: httpx.Client,
 ) -> None:
-    user = auth_client.get("/api/me").json()
-    seeded_person = auth_client.get("/api/people").json()[0]
+    user = auth_client.get("/api/auth/me").json()
+    seeded_person = auth_client.get("/api/people").json()["items"][0]
     assert seeded_person["created_by"] == user["id"]
     assert seeded_person["updated_by"] == user["id"]
     assert seeded_person["created_at"] == seeded_person["updated_at"]
@@ -308,10 +308,10 @@ def test_entity_metadata_is_flattened_from_pullable_and_touched_on_update(
 def test_related_content_changes_touch_expected_entities(
     auth_client: httpx.Client, tmp_path: Path
 ) -> None:
-    user = auth_client.get("/api/me").json()
-    people = auth_client.get("/api/people").json()
-    places = auth_client.get("/api/places").json()
-    event = auth_client.get("/api/events").json()[0]
+    user = auth_client.get("/api/auth/me").json()
+    people = auth_client.get("/api/people").json()["items"]
+    places = auth_client.get("/api/places").json()["items"]
+    event = auth_client.get("/api/events").json()["items"][0]
 
     person_before_participants = auth_client.get(
         f"/api/people/{people[0]['id']}"
@@ -371,8 +371,8 @@ def test_related_content_changes_touch_expected_entities(
 def test_person_place_replacement_from_both_sides_tracks_changed_counterparts(
     auth_client: httpx.Client,
 ) -> None:
-    people = auth_client.get("/api/people").json()
-    places = auth_client.get("/api/places").json()
+    people = auth_client.get("/api/people").json()["items"]
+    places = auth_client.get("/api/places").json()["items"]
     person_one, person_two = people[:2]
     place_one, place_two = places[:2]
 
@@ -451,7 +451,7 @@ def test_person_place_replacement_from_both_sides_tracks_changed_counterparts(
 
 
 def test_delete_restricts_places_and_epochs_used_by_events(auth_client: httpx.Client) -> None:
-    event = auth_client.get("/api/events").json()[0]
+    event = auth_client.get("/api/events").json()["items"][0]
     assert auth_client.delete(f"/api/places/{event['place_id']}").status_code == 409
     assert auth_client.delete(f"/api/epochs/{event['epoch_id']}").status_code == 409
 
@@ -467,7 +467,7 @@ def test_delete_cascades_media_and_relationship_rows(auth_client: httpx.Client, 
             "rarity": 1.0,
         },
     ).json()
-    place = auth_client.get("/api/places").json()[0]
+    place = auth_client.get("/api/places").json()["items"][0]
     linked = auth_client.put(
         f"/api/people/{person['id']}/places",
         json=[{"place_id": place["id"], "motivation": "Test cascade"}],
@@ -514,8 +514,8 @@ def test_date_and_enum_validation(auth_client: httpx.Client) -> None:
     )
     assert invalid_person.status_code == 422
 
-    places = auth_client.get("/api/places").json()
-    epochs = auth_client.get("/api/epochs").json()
+    places = auth_client.get("/api/places").json()["items"]
+    epochs = auth_client.get("/api/epochs").json()["items"]
     invalid_date = auth_client.post(
         "/api/events",
         json={
@@ -530,8 +530,8 @@ def test_date_and_enum_validation(auth_client: httpx.Client) -> None:
 
 
 def test_event_allows_empty_and_partial_date(auth_client: httpx.Client) -> None:
-    places = auth_client.get("/api/places").json()
-    epochs = auth_client.get("/api/epochs").json()
+    places = auth_client.get("/api/places").json()["items"]
+    epochs = auth_client.get("/api/epochs").json()["items"]
     response = auth_client.post(
         "/api/events",
         json={
@@ -610,7 +610,7 @@ def test_epoch_partial_dates_and_gregorian_validation(
     )
     assert invalid_epoch_day.status_code == 422
 
-    place = auth_client.get("/api/places").json()[0]
+    place = auth_client.get("/api/places").json()["items"][0]
     leap_epoch = auth_client.post(
         "/api/epochs",
         json={
@@ -652,7 +652,7 @@ def test_epoch_partial_dates_and_gregorian_validation(
 def test_event_epoch_range_validation_and_epoch_update_conflicts(
     auth_client: httpx.Client,
 ) -> None:
-    place = auth_client.get("/api/places").json()[0]
+    place = auth_client.get("/api/places").json()["items"][0]
     epoch = auth_client.post(
         "/api/epochs",
         json={
@@ -759,8 +759,8 @@ def test_event_epoch_range_validation_and_epoch_update_conflicts(
 
 
 def test_relationships_and_pulls(auth_client: httpx.Client) -> None:
-    people = auth_client.get("/api/people").json()
-    events = auth_client.get("/api/events").json()
+    people = auth_client.get("/api/people").json()["items"]
+    events = auth_client.get("/api/events").json()["items"]
     response = auth_client.put(
         f"/api/events/{events[0]['id']}/participants",
         json=[{"person_id": people[0]["id"], "role": "Guida", "motivation": "Test"}],
@@ -777,8 +777,8 @@ def test_relationships_and_pulls(auth_client: httpx.Client) -> None:
 
 
 def test_participant_roles_are_optional_free_form_strings(auth_client: httpx.Client) -> None:
-    people = auth_client.get("/api/people").json()
-    event = auth_client.get("/api/events").json()[0]
+    people = auth_client.get("/api/people").json()["items"]
+    event = auth_client.get("/api/events").json()["items"][0]
 
     response = auth_client.put(
         f"/api/events/{event['id']}/participants",
@@ -819,8 +819,8 @@ def test_participant_roles_are_optional_free_form_strings(auth_client: httpx.Cli
     assert too_long.status_code == 422
 
 
-def test_media_upload_and_list(auth_client: httpx.Client, tmp_path: Path) -> None:
-    event = auth_client.get("/api/events").json()[0]
+def test_media_upload_and_entity_ids(auth_client: httpx.Client, tmp_path: Path) -> None:
+    event = auth_client.get("/api/events").json()["items"][0]
     image = tmp_path / "tiny.png"
     image.write_bytes(b"\x89PNG\r\n\x1a\n")
     with image.open("rb") as handle:
@@ -831,9 +831,10 @@ def test_media_upload_and_list(auth_client: httpx.Client, tmp_path: Path) -> Non
         )
     assert response.status_code == 201
     media_id = response.json()["id"]
-    listed = auth_client.get("/api/media", params={"pullable_id": event["id"]})
-    assert listed.status_code == 200
-    assert any(item["id"] == media_id for item in listed.json())
+    assert auth_client.get("/api/media", params={"pullable_id": event["id"]}).status_code == 405
+    refreshed_event = auth_client.get(f"/api/events/{event['id']}")
+    assert refreshed_event.status_code == 200
+    assert media_id in refreshed_event.json()["media_ids"]
     assert auth_client.get(f"/api/media/{media_id}").status_code == 200
     event_before_delete = auth_client.get(f"/api/events/{event['id']}").json()
 
@@ -859,7 +860,7 @@ def test_media_upload_and_list(auth_client: httpx.Client, tmp_path: Path) -> Non
 def test_media_delete_reconciles_missing_files_and_requires_authentication(
     auth_client: httpx.Client, client: httpx.Client, tmp_path: Path
 ) -> None:
-    event = auth_client.get("/api/events").json()[0]
+    event = auth_client.get("/api/events").json()["items"][0]
     image = tmp_path / "stale.png"
     image.write_bytes(b"\x89PNG\r\n\x1a\n")
     with image.open("rb") as handle:

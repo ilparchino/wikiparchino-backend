@@ -826,6 +826,7 @@ def test_place_people_activity_migration_preserves_rows_and_guards_downgrade(
         assert connection.exec_driver_sql("pragma foreign_key_check").all() == []
     engine.dispose()
 
+
     with pytest.raises(RuntimeError, match="replace_people activity"):
         command.downgrade(config, "0009_social_groups")
 
@@ -845,4 +846,60 @@ def test_place_people_activity_migration_preserves_rows_and_guards_downgrade(
             text("select action from activity_log where id = 91")
         ).scalar_one() == "update"
         assert connection.exec_driver_sql("pragma foreign_key_check").all() == []
+    engine.dispose()
+
+
+def test_pullable_query_indexes_upgrade_and_downgrade(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    db_path = tmp_path / "query-indexes.sqlite"
+    database_url = f"sqlite:///{db_path}"
+    monkeypatch.setenv("WIKI_PARCHINO_DATABASE_URL", database_url)
+    backend_dir = Path(__file__).resolve().parents[1]
+    config = migration_config(backend_dir)
+    command.upgrade(config, "0010_place_people_activity")
+    command.upgrade(config, "head")
+
+    expected = {
+        "ix_pullable_created_at_id",
+        "ix_pullable_updated_at_id",
+        "ix_person_alias_nocase_id",
+        "ix_place_name_nocase_id",
+        "ix_epoch_name_nocase_id",
+        "ix_event_title_nocase_id",
+        "ix_social_group_name_nocase_id",
+        "ix_event_date_id",
+        "ix_event_place_date_id",
+        "ix_event_epoch_date_id",
+        "ix_person_event_event_person",
+        "ix_person_place_place_person",
+    }
+    engine = create_engine(database_url)
+    with engine.connect() as connection:
+        present = set(
+            connection.execute(
+                text("select name from sqlite_master where type='index'")
+            ).scalars()
+        )
+        assert expected <= present
+        plan = connection.execute(
+            text(
+                "explain query plan select id from person "
+                "order by alias collate nocase, id limit 18"
+            )
+        ).all()
+        assert any("ix_person_alias_nocase_id" in row[3] for row in plan)
+        assert connection.exec_driver_sql("pragma foreign_key_check").all() == []
+    engine.dispose()
+
+    command.downgrade(config, "0010_place_people_activity")
+    engine = create_engine(database_url)
+    with engine.connect() as connection:
+        present = set(
+            connection.execute(
+                text("select name from sqlite_master where type='index'")
+            ).scalars()
+        )
+        assert expected.isdisjoint(present)
     engine.dispose()

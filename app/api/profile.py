@@ -1,57 +1,79 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from sqlalchemy import and_, func, literal, select, union_all
 from sqlalchemy.orm import Session
 
 from app.api.deps import current_session, current_user
-from app.api.utils import MODEL_BY_ENTITY, entity_title
+from app.api.utils import MODEL_BY_ENTITY
 from app.database import get_db
-from app.models import ActivityLog, EntityType, SecurityEventType, UserAccount, UserSession
-from app.schemas import PasswordChangeIn, ProfileActivityOut, ProfileOut, UserOut
+from app.models import ActivityLog, EntityType, Pullable, SecurityEventType, UserAccount, UserSession
+from app.schemas import Page, PasswordChangeIn, ProfileActivityOut, ProfileOut, UserOut
 from app.security import hash_password, utcnow, verify_password
 from app.security_events import log_security_event, request_ip
 
 router = APIRouter(prefix="/profile", tags=["profile"])
-RECENT_ACTIVITY_LIMIT = 10
+
+
+def profile_activity_select(entity_type: EntityType, user_id: int):
+    model = MODEL_BY_ENTITY[entity_type]
+    title = model.alias if entity_type == EntityType.PERSON else (
+        model.title if entity_type == EntityType.EVENT else model.name
+    )
+    return (
+        select(
+            literal(entity_type.value).label("entity_type"),
+            ActivityLog.entity_id.label("entity_id"),
+            title.label("title"),
+            ActivityLog.action.label("action"),
+            ActivityLog.occurred_at.label("occurred_at"),
+            ActivityLog.id.label("log_id"),
+        )
+        .select_from(ActivityLog)
+        .join(
+            model,
+            and_(
+                ActivityLog.entity_type == entity_type.value,
+                ActivityLog.entity_id == model.id,
+            ),
+        )
+        .join(Pullable, Pullable.id == model.id)
+        .where(
+            ActivityLog.actor_user_id == user_id,
+            ActivityLog.action != "delete",
+            ActivityLog.occurred_at >= Pullable.created_at,
+        )
+    )
 
 
 @router.get("", response_model=ProfileOut)
 def get_profile(
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=10, ge=1, le=100),
     user: UserAccount = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> ProfileOut:
-    logs = (
-        db.query(ActivityLog)
-        .filter(ActivityLog.actor_user_id == user.id, ActivityLog.action != "delete")
-        .order_by(ActivityLog.occurred_at.desc(), ActivityLog.id.desc())
-        .yield_per(100)
-    )
-    activity: list[ProfileActivityOut] = []
-    for log in logs:
-        try:
-            entity_type = EntityType(log.entity_type)
-        except ValueError:
-            continue
-        item = db.get(MODEL_BY_ENTITY[entity_type], log.entity_id)
-        if item is None:
-            continue
-        if log.occurred_at < item.pullable.created_at:
-            # Protect legacy activity created before pullable IDs became non-reusable.
-            continue
-        activity.append(
-            ProfileActivityOut(
-                entity_type=entity_type,
-                entity_id=log.entity_id,
-                title=entity_title(item, entity_type),
-                action="created" if log.action == "create" else "updated",
-                occurred_at=log.occurred_at,
-            )
+    combined = union_all(*(profile_activity_select(kind, user.id) for kind in EntityType)).subquery()
+    total = db.execute(select(func.count()).select_from(combined)).scalar_one()
+    rows = db.execute(
+        select(combined)
+        .order_by(combined.c.occurred_at.desc(), combined.c.log_id.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    ).mappings()
+    activity = [
+        ProfileActivityOut(
+            entity_type=row["entity_type"],
+            entity_id=row["entity_id"],
+            title=row["title"],
+            action="created" if row["action"] == "create" else "updated",
+            occurred_at=row["occurred_at"],
         )
-        if len(activity) == RECENT_ACTIVITY_LIMIT:
-            break
+        for row in rows
+    ]
     return ProfileOut(
         user=UserOut.model_validate(user),
-        recent_activity=activity,
+        activity=Page(items=activity, total=total, page=page, page_size=page_size),
     )
 
 

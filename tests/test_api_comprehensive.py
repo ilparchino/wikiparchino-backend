@@ -31,7 +31,7 @@ def first(items: Iterable[dict[str, Any]], label: str) -> dict[str, Any]:
 def test_cors_bearer_login_and_session_reuse(client: httpx.Client) -> None:
     origin = "http://127.0.0.1:5173"
     preflight = client.options(
-        "/api/me",
+        "/api/auth/me",
         headers={
             "Origin": origin,
             "Access-Control-Request-Method": "GET",
@@ -43,7 +43,7 @@ def test_cors_bearer_login_and_session_reuse(client: httpx.Client) -> None:
     assert "authorization" in preflight.headers["access-control-allow-headers"].lower()
     assert "access-control-allow-credentials" not in preflight.headers
 
-    unauthenticated = client.get("/api/me")
+    unauthenticated = client.get("/api/auth/me")
     assert_status(unauthenticated, 401)
     assert unauthenticated.headers["www-authenticate"] == "Bearer"
     login_response = client.post(
@@ -64,20 +64,20 @@ def test_cors_bearer_login_and_session_reuse(client: httpx.Client) -> None:
 
     client.headers["Authorization"] = f"Bearer {payload['access_token']}"
 
-    me = client.get("/api/me")
+    me = client.get("/api/auth/me")
     assert_status(me, 200)
     assert me.json()["username"] == "admin"
 
     logout = client.post("/api/auth/logout")
     assert_status(logout, 204)
-    revoked = client.get("/api/me")
+    revoked = client.get("/api/auth/me")
     assert_status(revoked, 401)
     assert revoked.headers["www-authenticate"] == "Bearer"
 
 
 def test_bearer_validation_expiry_and_inactive_accounts(client: httpx.Client) -> None:
     for authorization in ["Basic abc", "Bearer", "Bearer invalid-token"]:
-        response = client.get("/api/me", headers={"Authorization": authorization})
+        response = client.get("/api/auth/me", headers={"Authorization": authorization})
         assert_status(response, 401)
         assert response.headers["www-authenticate"] == "Bearer"
 
@@ -97,7 +97,7 @@ def test_bearer_validation_expiry_and_inactive_accounts(client: httpx.Client) ->
         session.expires_at = utcnow() - timedelta(seconds=1)
         db.commit()
 
-    expired = client.get("/api/me", headers={"Authorization": f"Bearer {token}"})
+    expired = client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
     assert_status(expired, 401)
     assert expired.json()["detail"] == "Sessione scaduta"
 
@@ -111,7 +111,7 @@ def test_bearer_validation_expiry_and_inactive_accounts(client: httpx.Client) ->
         db.commit()
 
     inactive = client.get(
-        "/api/me",
+        "/api/auth/me",
         headers={"Authorization": f"Bearer {active_login['access_token']}"},
     )
     assert_status(inactive, 401)
@@ -134,11 +134,11 @@ def test_logout_revokes_only_the_presented_session(client: httpx.Client) -> None
         204,
     )
     assert_status(
-        client.get("/api/me", headers={"Authorization": f"Bearer {first_token}"}),
+        client.get("/api/auth/me", headers={"Authorization": f"Bearer {first_token}"}),
         401,
     )
     assert_status(
-        client.get("/api/me", headers={"Authorization": f"Bearer {second_token}"}),
+        client.get("/api/auth/me", headers={"Authorization": f"Bearer {second_token}"}),
         200,
     )
 
@@ -163,7 +163,6 @@ def test_login_throttling(client: httpx.Client) -> None:
 
 def test_protected_api_routes_reject_unauthenticated_requests(client: httpx.Client) -> None:
     protected_gets = [
-        "/api/me",
         "/api/auth/me",
         "/api/profile",
         "/api/people",
@@ -189,12 +188,15 @@ def test_protected_api_routes_reject_unauthenticated_requests(client: httpx.Clie
         "/api/search?q=parchino",
         "/api/pulls/random",
         "/api/pulls/daily?day=2026-07-11",
-        "/api/media",
+        "/api/pullables/counts",
+        "/api/pullables/recent",
         "/api/media/previews?pullable_id=1",
         "/api/media/1",
     ]
     for path in protected_gets:
         assert_status(client.get(path), 401)
+    assert_status(client.get("/api/me"), 404)
+    assert_status(client.get("/api/media"), 405)
 
     assert_status(client.post("/api/auth/logout"), 401)
     assert_status(client.post("/api/people", json={"alias": "No auth", "rarity": 1.0}), 401)
@@ -216,11 +218,11 @@ def test_comprehensive_authenticated_api_scenario(client: httpx.Client) -> None:
     for response in [people, places, epochs, events, groups]:
         assert_status(response, 200)
 
-    seeded_person = first(people.json(), "person")
-    seeded_place = first(places.json(), "place")
-    seeded_epoch = first(epochs.json(), "epoch")
-    seeded_event = first(events.json(), "event")
-    seeded_group = first(groups.json(), "group")
+    seeded_person = first(people.json()["items"], "person")
+    seeded_place = first(places.json()["items"], "place")
+    seeded_epoch = first(epochs.json()["items"], "epoch")
+    seeded_event = first(events.json()["items"], "event")
+    seeded_group = first(groups.json()["items"], "group")
 
     assert_status(client.get(f"/api/people/{seeded_person['id']}"), 200)
     assert_status(client.get(f"/api/places/{seeded_place['id']}"), 200)
@@ -233,7 +235,7 @@ def test_comprehensive_authenticated_api_scenario(client: httpx.Client) -> None:
 
     search = client.get("/api/search", params={"q": seeded_event["title"]})
     assert_status(search, 200)
-    assert any(item["entity_type"] == "event" and item["id"] == seeded_event["id"] for item in search.json())
+    assert any(item["entity_type"] == "event" and item["id"] == seeded_event["id"] for item in search.json()["items"])
 
     daily_a = client.get("/api/pulls/daily", params={"day": "2026-07-11"})
     daily_b = client.get("/api/pulls/daily", params={"day": "2026-07-11"})
@@ -343,9 +345,8 @@ def test_comprehensive_authenticated_api_scenario(client: httpx.Client) -> None:
     )
     assert_status(uploaded, 201)
     media = uploaded.json()
-    media_list = client.get("/api/media", params={"pullable_id": event["id"]})
-    assert_status(media_list, 200)
-    assert any(item["id"] == media["id"] for item in media_list.json())
+    assert_status(client.get("/api/media", params={"pullable_id": event["id"]}), 405)
+    assert media["id"] in client.get(f"/api/events/{event['id']}").json()["media_ids"]
     media_file = client.get(f"/api/media/{media['id']}")
     assert_status(media_file, 200)
     assert media_file.headers["content-type"].startswith("image/png")

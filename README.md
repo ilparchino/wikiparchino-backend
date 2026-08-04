@@ -190,16 +190,17 @@ Keep `WIKI_PARCHINO_ROOT_PATH` empty for direct local access. When a reverse pro
 
 All application endpoints are under `/api`:
 
-- `/auth/login`, `/auth/logout`, and `/me`
+- `/auth/login`, `/auth/logout`, and `/auth/me`
 - `/maintenance/status` (public and non-cacheable)
 - `/profile` and `/profile/password`
 - `/admin/summary`, `/admin/users`, and `/admin/activity` (administrators only)
 - `/people`, `/places`, `/epochs`, `/events`, and `/groups`
+- `/pullables/counts` and `/pullables/recent`
 - collection searches at `/people/search`, `/places/search`, `/epochs/search`, `/events/search`, and `/groups/search`
 - relationship endpoints nested under people, places, epochs, events, and groups
 - `/search` for cross-entity search
 - `/pulls/random` and `/pulls/daily`
-- `/media`, `/media/previews`, and `/media/{id}`
+- `POST /media`, `/media/previews`, and `/media/{id}`
 
 Except for health, maintenance status, and login, application endpoints require `Authorization: Bearer <token>`. Login returns the opaque token once; the server stores only its hash. Routes below `/api/admin` additionally require an active account with `is_admin = true`; this is enforced by the backend and does not depend on frontend visibility.
 
@@ -208,6 +209,8 @@ Epochs may define an optional partial start and/or end date. Partial dates suppo
 Groups represent Italian UI "Cerchie" and are regular pullable entities with rarity, media, search, and activity history. Group membership with people and epochs is many-to-many. Membership sets are replaced independently through the group relationship endpoints; reciprocal person and epoch routes are read-only.
 
 Collection search endpoints accept `q` and an optional `limit` from 1 to 50, and return lightweight `id`, `title`, and `subtitle` results. Person-event links are written from events, and person-group links are written from groups. Person-place links may be replaced from either side; changed relationships update the metadata and activity of both affected entities.
+
+Entity collections accept `page`, `page_size`, `q`, `sort`, and `order`; people and events also expose their documented typed filters. They return an envelope containing `items`, `total`, `page`, and `page_size`. Global `/search`, `/pullables/recent`, and profile activity are paginated as well. Entity responses include newest-first `media_ids`, which clients use with authenticated `GET /media/{id}` requests; there is no general media-list endpoint.
 
 Administrators deactivate accounts instead of deleting them. Deactivation immediately revokes all sessions while preserving attribution and activity history; reactivation permits a future login but does not create a session. Content actions remain in `activity_log`. Account and access actions are stored separately in `security_event_log`; authentication events are pruned after 90 days and credential material is never logged. The OpenAPI UI is the authoritative interactive endpoint reference.
 
@@ -242,7 +245,7 @@ Run the complete backend suite:
 make test
 ```
 
-The suite uses a small isolated seed rather than the larger manual demo dataset. It covers authentication and session reuse, maintenance enforcement and Telegram delivery failures, administrator authorization and account safeguards, account deactivation, activity/security history, profile activity, password changes, CRUD, database constraints, hard-delete behavior, relationships, media previews and storage, search, pulls, demo seeding, and fresh Alembic migrations.
+The suite uses a small isolated seed rather than the larger manual demo dataset. It covers authentication and session reuse, maintenance enforcement and Telegram delivery failures, administrator authorization and account safeguards, account deactivation, activity/security history, paginated profile activity, password changes, CRUD, collection filtering/sorting/pagination, database constraints and query indexes, hard-delete behavior, relationships, media IDs and storage, search, pulls, demo seeding, and fresh Alembic migrations.
 
 ## Deployment
 

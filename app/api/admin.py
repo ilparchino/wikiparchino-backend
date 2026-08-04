@@ -6,20 +6,17 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from sqlalchemy import case, func, literal, select, union_all
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.api.deps import current_admin, current_session
+from app.api.pullables import pullable_count_columns
 from app.api.utils import MODEL_BY_ENTITY, entity_title
 from app.database import get_db
 from app.models import (
     ActivityLog,
     EntityType,
-    Epoch,
-    Event,
     MediaAsset,
-    Person,
-    Place,
-    SocialGroup,
+    Pullable,
     SecurityEventLog,
     SecurityEventType,
     UserAccount,
@@ -94,13 +91,17 @@ def logged_title(log: ActivityLog) -> str | None:
     return None
 
 
-def serialize_content_activity(db: Session, log: ActivityLog) -> AdminActivityOut:
-    actor = db.get(UserAccount, log.actor_user_id) if log.actor_user_id else None
+def serialize_content_activity(
+    log: ActivityLog,
+    users: dict[int, UserAccount],
+    entities: dict[tuple[EntityType, int], object],
+) -> AdminActivityOut:
+    actor = users.get(log.actor_user_id) if log.actor_user_id else None
     entity_type = None
     item = None
     try:
         entity_type = EntityType(log.entity_type)
-        candidate = db.get(MODEL_BY_ENTITY[entity_type], log.entity_id)
+        candidate = entities.get((entity_type, log.entity_id))
         if candidate is not None and log.occurred_at >= candidate.pullable.created_at:
             item = candidate
     except ValueError:
@@ -117,9 +118,12 @@ def serialize_content_activity(db: Session, log: ActivityLog) -> AdminActivityOu
     )
 
 
-def serialize_security_activity(db: Session, event: SecurityEventLog) -> AdminActivityOut:
-    actor = db.get(UserAccount, event.actor_user_id) if event.actor_user_id else None
-    target = db.get(UserAccount, event.target_user_id) if event.target_user_id else None
+def serialize_security_activity(
+    event: SecurityEventLog,
+    users: dict[int, UserAccount],
+) -> AdminActivityOut:
+    actor = users.get(event.actor_user_id) if event.actor_user_id else None
+    target = users.get(event.target_user_id) if event.target_user_id else None
     is_authentication = event.event_type in AUTHENTICATION_EVENT_TYPES
     return AdminActivityOut(
         source="authentication" if is_authentication else "account",
@@ -130,6 +134,69 @@ def serialize_security_activity(db: Session, event: SecurityEventLog) -> AdminAc
         title=target.display_name if target else event.attempted_username,
         source_ip=event.source_ip,
     )
+
+
+def hydrate_activity(
+    db: Session,
+    identities: list[tuple[str, int]],
+) -> list[AdminActivityOut]:
+    content_ids = [log_id for source, log_id in identities if source == "content"]
+    security_ids = [log_id for source, log_id in identities if source != "content"]
+    content_logs = {
+        log.id: log
+        for log in db.query(ActivityLog).filter(ActivityLog.id.in_(content_ids)).all()
+    } if content_ids else {}
+    security_logs = {
+        event.id: event
+        for event in db.query(SecurityEventLog).filter(SecurityEventLog.id.in_(security_ids)).all()
+    } if security_ids else {}
+
+    user_ids = {
+        user_id
+        for log in content_logs.values()
+        for user_id in (log.actor_user_id,)
+        if user_id is not None
+    }
+    user_ids.update(
+        user_id
+        for event in security_logs.values()
+        for user_id in (event.actor_user_id, event.target_user_id)
+        if user_id is not None
+    )
+    users = {
+        user.id: user
+        for user in db.query(UserAccount).filter(UserAccount.id.in_(user_ids)).all()
+    } if user_ids else {}
+
+    ids_by_type: dict[EntityType, set[int]] = {}
+    for log in content_logs.values():
+        try:
+            entity_type = EntityType(log.entity_type)
+        except ValueError:
+            continue
+        ids_by_type.setdefault(entity_type, set()).add(log.entity_id)
+    entities: dict[tuple[EntityType, int], object] = {}
+    for entity_type, entity_ids in ids_by_type.items():
+        model = MODEL_BY_ENTITY[entity_type]
+        for item in (
+            db.query(model)
+            .options(joinedload(model.pullable).noload(Pullable.media_assets))
+            .filter(model.id.in_(entity_ids))
+            .all()
+        ):
+            entities[(entity_type, item.id)] = item
+
+    result: list[AdminActivityOut] = []
+    for source, log_id in identities:
+        if source == "content":
+            log = content_logs.get(log_id)
+            if log:
+                result.append(serialize_content_activity(log, users, entities))
+        else:
+            event = security_logs.get(log_id)
+            if event:
+                result.append(serialize_security_activity(event, users))
+    return result
 
 
 def validate_admin_change(
@@ -182,23 +249,26 @@ def get_summary(
 ) -> AdminSummaryOut:
     now = utcnow()
     since = now - timedelta(days=1)
-    return AdminSummaryOut(
-        total_users=db.query(UserAccount).count(),
-        active_users=db.query(UserAccount).filter(UserAccount.is_active.is_(True)).count(),
-        inactive_users=db.query(UserAccount).filter(UserAccount.is_active.is_(False)).count(),
-        admin_users=db.query(UserAccount).filter(UserAccount.is_admin.is_(True)).count(),
-        active_sessions=db.query(UserSession).filter(UserSession.expires_at > now).count(),
-        people=db.query(Person).count(),
-        places=db.query(Place).count(),
-        epochs=db.query(Epoch).count(),
-        events=db.query(Event).count(),
-        groups=db.query(SocialGroup).count(),
-        media=db.query(MediaAsset).count(),
-        activity_last_24h=(
-            db.query(ActivityLog).filter(ActivityLog.occurred_at >= since).count()
-            + db.query(SecurityEventLog).filter(SecurityEventLog.occurred_at >= since).count()
-        ),
-    )
+    def count(model, *criteria):
+        statement = select(func.count()).select_from(model)
+        if criteria:
+            statement = statement.where(*criteria)
+        return statement.scalar_subquery()
+
+    row = db.query(
+        count(UserAccount).label("total_users"),
+        count(UserAccount, UserAccount.is_active.is_(True)).label("active_users"),
+        count(UserAccount, UserAccount.is_active.is_(False)).label("inactive_users"),
+        count(UserAccount, UserAccount.is_admin.is_(True)).label("admin_users"),
+        count(UserSession, UserSession.expires_at > now).label("active_sessions"),
+        *pullable_count_columns(),
+        count(MediaAsset).label("media"),
+        (
+            count(ActivityLog, ActivityLog.occurred_at >= since)
+            + count(SecurityEventLog, SecurityEventLog.occurred_at >= since)
+        ).label("activity_last_24h"),
+    ).one()
+    return AdminSummaryOut(**row._mapping)
 
 
 @router.get("/users", response_model=list[AdminUserOut])
@@ -270,8 +340,8 @@ def get_user(
     sessions = active_session_counts(db, utcnow()).get(user_id, 0)
     return AdminUserDetailOut(
         user=serialize_admin_user(target, sessions),
-        content_activity=[serialize_content_activity(db, log) for log in content_logs],
-        account_activity=[serialize_security_activity(db, event) for event in account_logs],
+        content_activity=hydrate_activity(db, [("content", log.id) for log in content_logs]),
+        account_activity=hydrate_activity(db, [("account", event.id) for event in account_logs]),
     )
 
 
@@ -410,6 +480,7 @@ def list_activity(
     actor_user_id: int | None = Query(default=None, ge=1),
     source: Literal["content", "account", "authentication"] | None = None,
     action: str | None = Query(default=None, max_length=40),
+    order: Literal["asc", "desc"] = Query(default="desc"),
     admin: UserAccount = Depends(current_admin),
     db: Session = Depends(get_db),
 ) -> AdminActivityPage:
@@ -451,20 +522,12 @@ def list_activity(
 
     combined = union_all(*queries).subquery()
     total = db.execute(select(func.count()).select_from(combined)).scalar_one()
+    direction = (lambda column: column.asc()) if order == "asc" else (lambda column: column.desc())
     rows = db.execute(
         select(combined)
-        .order_by(combined.c.occurred_at.desc(), combined.c.source, combined.c.log_id.desc())
+        .order_by(direction(combined.c.occurred_at), combined.c.source, direction(combined.c.log_id))
         .offset((page - 1) * page_size)
         .limit(page_size)
     ).all()
-    items: list[AdminActivityOut] = []
-    for row in rows:
-        if row.source == "content":
-            log = db.get(ActivityLog, row.log_id)
-            if log:
-                items.append(serialize_content_activity(db, log))
-        else:
-            event = db.get(SecurityEventLog, row.log_id)
-            if event:
-                items.append(serialize_security_activity(db, event))
+    items = hydrate_activity(db, [(row.source, row.log_id) for row in rows])
     return AdminActivityPage(items=items, total=total, page=page, page_size=page_size)

@@ -80,15 +80,15 @@ def test_profile_returns_the_ten_newest_live_activities(client: httpx.Client) ->
     assert profile["user"]["display_name"] == "Admin"
     assert profile["user"]["is_admin"] is True
     assert profile["user"]["is_owner"] is True
-    assert len(profile["recent_activity"]) == 10
-    assert profile["recent_activity"][0] == {
+    assert len(profile["activity"]["items"]) == 10
+    assert profile["activity"]["items"][0] == {
         "entity_type": "person",
         "entity_id": created[0]["id"],
         "title": "Profilo aggiornato",
         "action": "updated",
-        "occurred_at": profile["recent_activity"][0]["occurred_at"],
+        "occurred_at": profile["activity"]["items"][0]["occurred_at"],
     }
-    activity_ids = {item["entity_id"] for item in profile["recent_activity"]}
+    activity_ids = {item["entity_id"] for item in profile["activity"]["items"]}
     assert created[-1]["id"] not in activity_ids
     assert other.json()["id"] not in activity_ids
 
@@ -97,25 +97,25 @@ def test_relationship_and_media_changes_are_profile_updates(
     auth_client: httpx.Client,
     tmp_path: Path,
 ) -> None:
-    event = auth_client.get("/api/events").json()[0]
-    person = auth_client.get("/api/people").json()[0]
+    event = auth_client.get("/api/events").json()["items"][0]
+    person = auth_client.get("/api/people").json()["items"][0]
     replaced = auth_client.put(
         f"/api/events/{event['id']}/participants",
         json=[{"person_id": person["id"], "role": "Guida", "motivation": None}],
     )
     assert replaced.status_code == 200
-    activity = auth_client.get("/api/profile").json()["recent_activity"]
+    activity = auth_client.get("/api/profile").json()["activity"]["items"]
     assert activity[0]["entity_id"] == event["id"]
     assert activity[0]["entity_type"] == "event"
     assert activity[0]["action"] == "updated"
 
-    group = auth_client.get("/api/groups").json()[0]
+    group = auth_client.get("/api/groups").json()["items"][0]
     replaced_group = auth_client.put(
         f"/api/groups/{group['id']}/people",
         json={"person_ids": [person["id"]]},
     )
     assert replaced_group.status_code == 200
-    activity = auth_client.get("/api/profile").json()["recent_activity"]
+    activity = auth_client.get("/api/profile").json()["activity"]["items"]
     assert activity[0]["entity_id"] == group["id"]
     assert activity[0]["entity_type"] == "group"
     assert activity[0]["action"] == "updated"
@@ -129,12 +129,12 @@ def test_relationship_and_media_changes_are_profile_updates(
             files={"file": ("profile.png", handle, "image/png")},
         )
     assert upload.status_code == 201
-    activity = auth_client.get("/api/profile").json()["recent_activity"]
+    activity = auth_client.get("/api/profile").json()["activity"]["items"]
     assert activity[0]["entity_id"] == person["id"]
     assert activity[0]["action"] == "updated"
 
     assert auth_client.delete(f"/api/media/{upload.json()['id']}").status_code == 204
-    activity = auth_client.get("/api/profile").json()["recent_activity"]
+    activity = auth_client.get("/api/profile").json()["activity"]["items"]
     assert activity[0]["entity_id"] == person["id"]
     assert activity[0]["action"] == "updated"
 
@@ -165,7 +165,7 @@ def test_password_change_preserves_current_session_and_revokes_others(
         headers=current_headers,
     )
     assert wrong.status_code == 400
-    assert client.get("/api/me", headers=current_headers).status_code == 200
+    assert client.get("/api/auth/me", headers=current_headers).status_code == 200
 
     changed = client.put(
         "/api/profile/password",
@@ -176,9 +176,9 @@ def test_password_change_preserves_current_session_and_revokes_others(
         headers=current_headers,
     )
     assert changed.status_code == 204
-    assert client.get("/api/me", headers=current_headers).status_code == 200
+    assert client.get("/api/auth/me", headers=current_headers).status_code == 200
     assert client.get(
-        "/api/me", headers={"Authorization": f"Bearer {other_token}"}
+        "/api/auth/me", headers={"Authorization": f"Bearer {other_token}"}
     ).status_code == 401
     assert client.post(
         "/api/auth/login", json={"username": "admin", "password": "admin"}
@@ -203,7 +203,7 @@ def test_media_previews_and_file_cache_policy(
     auth_client: httpx.Client,
     tmp_path: Path,
 ) -> None:
-    people = auth_client.get("/api/people").json()
+    people = auth_client.get("/api/people").json()["items"]
     first_person = people[0]
     second_person = people[1]
     uploaded = []
@@ -278,8 +278,8 @@ def test_logged_operations_share_the_exact_operation_timestamp(
         )
         assert pullable.updated_at == activity.occurred_at
 
-    event = auth_client.get("/api/events").json()[0]
-    people = auth_client.get("/api/people").json()[:2]
+    event = auth_client.get("/api/events").json()["items"][0]
+    people = auth_client.get("/api/people").json()["items"][:2]
     replaced = auth_client.put(
         f"/api/events/{event['id']}/participants",
         json=[

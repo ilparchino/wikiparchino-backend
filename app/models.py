@@ -14,6 +14,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    func,
     text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -191,6 +192,12 @@ class Pullable(Base, AttributionMixin):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     rarity: Mapped[float] = mapped_column(Float, default=1.0, nullable=False)
+    media_assets: Mapped[list["MediaAsset"]] = relationship(
+        back_populates="pullable",
+        lazy="selectin",
+        order_by=lambda: (MediaAsset.created_at.desc(), MediaAsset.id.desc()),
+        passive_deletes="all",
+    )
 
 
 class PullableEntityMixin:
@@ -216,6 +223,10 @@ class PullableEntityMixin:
     @property
     def updated_by(self) -> int | None:
         return self.pullable.updated_by
+
+    @property
+    def media_ids(self) -> list[int]:
+        return [asset.id for asset in self.pullable.media_assets]
 
 
 class Person(Base, PullableEntityMixin):
@@ -487,7 +498,7 @@ class MediaAsset(Base):
         ForeignKey("user_account.id", ondelete="SET NULL", onupdate="CASCADE"), nullable=True
     )
 
-    pullable: Mapped[Pullable] = relationship()
+    pullable: Mapped[Pullable] = relationship(back_populates="media_assets")
 
 
 class ActivityLog(Base):
@@ -554,3 +565,37 @@ class SecurityEventLog(Base):
     source_ip: Mapped[str | None] = mapped_column(String(45), nullable=True)
     payload_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     occurred_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+
+
+Index("ix_pullable_created_at_id", Pullable.created_at.desc(), Pullable.id.desc())
+Index("ix_pullable_updated_at_id", Pullable.updated_at.desc(), Pullable.id.desc())
+Index("ix_person_alias_nocase_id", Person.alias.collate("NOCASE"), Person.id)
+Index("ix_place_name_nocase_id", Place.name.collate("NOCASE"), Place.id)
+Index("ix_epoch_name_nocase_id", Epoch.name.collate("NOCASE"), Epoch.id)
+Index("ix_event_title_nocase_id", Event.title.collate("NOCASE"), Event.id)
+Index("ix_social_group_name_nocase_id", SocialGroup.name.collate("NOCASE"), SocialGroup.id)
+Index(
+    "ix_event_date_id",
+    Event.year.desc(),
+    func.coalesce(Event.month, 1).desc(),
+    func.coalesce(Event.day, 1).desc(),
+    Event.id.desc(),
+)
+Index(
+    "ix_event_place_date_id",
+    Event.place_id,
+    Event.year.desc(),
+    func.coalesce(Event.month, 1).desc(),
+    func.coalesce(Event.day, 1).desc(),
+    Event.id.desc(),
+)
+Index(
+    "ix_event_epoch_date_id",
+    Event.epoch_id,
+    Event.year.desc(),
+    func.coalesce(Event.month, 1).desc(),
+    func.coalesce(Event.day, 1).desc(),
+    Event.id.desc(),
+)
+Index("ix_person_event_event_person", PersonEvent.event_id, PersonEvent.person_id)
+Index("ix_person_place_place_person", PersonPlace.place_id, PersonPlace.person_id)

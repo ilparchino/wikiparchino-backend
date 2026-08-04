@@ -132,8 +132,8 @@ def test_deactivation_preserves_account_and_revokes_sessions(client: httpx.Clien
     )
     assert deactivated.status_code == 200
     assert deactivated.json()["is_active"] is False
-    assert client.get("/api/me", headers=headers(first)).status_code == 401
-    assert client.get("/api/me", headers=headers(second)).status_code == 401
+    assert client.get("/api/auth/me", headers=headers(first)).status_code == 401
+    assert client.get("/api/auth/me", headers=headers(second)).status_code == 401
     assert client.post(
         "/api/auth/login", json={"username": "disattiva", "password": "password-sicura"}
     ).status_code == 401
@@ -161,7 +161,7 @@ def test_deactivation_preserves_account_and_revokes_sessions(client: httpx.Clien
 
 def test_self_safety_password_reset_and_session_revocation(client: httpx.Client) -> None:
     admin_token = login(client)
-    admin = client.get("/api/me", headers=headers(admin_token)).json()
+    admin = client.get("/api/auth/me", headers=headers(admin_token)).json()
     for payload in (
         {"display_name": admin["display_name"], "is_admin": False, "is_active": True},
         {"display_name": admin["display_name"], "is_admin": True, "is_active": False},
@@ -191,7 +191,7 @@ def test_self_safety_password_reset_and_session_revocation(client: httpx.Client)
         json={"new_password": "password-sicura"},
     )
     assert reused.status_code == 400
-    assert client.get("/api/me", headers=headers(old_token)).status_code == 200
+    assert client.get("/api/auth/me", headers=headers(old_token)).status_code == 200
     detail_after = client.get(
         f"/api/admin/users/{target['id']}",
         headers=headers(admin_token),
@@ -207,14 +207,14 @@ def test_self_safety_password_reset_and_session_revocation(client: httpx.Client)
         json={"new_password": " password-sicura"},
     )
     assert invalid.status_code == 422
-    assert client.get("/api/me", headers=headers(old_token)).status_code == 200
+    assert client.get("/api/auth/me", headers=headers(old_token)).status_code == 200
 
     assert client.put(
         f"/api/admin/users/{target['id']}/password",
         headers=headers(admin_token),
         json={"new_password": "password nuova café ☕"},
     ).status_code == 204
-    assert client.get("/api/me", headers=headers(old_token)).status_code == 401
+    assert client.get("/api/auth/me", headers=headers(old_token)).status_code == 401
     assert client.post(
         "/api/auth/login",
         json={"username": "reset", "password": "password nuova café ☕ "},
@@ -227,19 +227,19 @@ def test_self_safety_password_reset_and_session_revocation(client: httpx.Client)
     )
     assert revoked.status_code == 200
     assert revoked.json()["revoked_count"] == 1
-    assert client.get("/api/me", headers=headers(new_token)).status_code == 401
+    assert client.get("/api/auth/me", headers=headers(new_token)).status_code == 401
 
     current = client.post(
         f"/api/admin/users/{admin['id']}/sessions/revoke",
         headers=headers(admin_token),
     )
     assert current.status_code == 200
-    assert client.get("/api/me", headers=headers(admin_token)).status_code == 200
+    assert client.get("/api/auth/me", headers=headers(admin_token)).status_code == 200
 
 
 def test_owner_is_protected_from_other_administrators(client: httpx.Client) -> None:
     owner_token = login(client)
-    owner = client.get("/api/me", headers=headers(owner_token)).json()
+    owner = client.get("/api/auth/me", headers=headers(owner_token)).json()
     assert owner["is_owner"] is True
 
     other_admin = create_user(client, owner_token, "altro-admin", is_admin=True)
@@ -275,7 +275,7 @@ def test_owner_is_protected_from_other_administrators(client: httpx.Client) -> N
     for method, path, payload in protected_requests:
         response = client.request(method, path, headers=headers(other_token), json=payload)
         assert response.status_code == 403, (path, response.text)
-        assert client.get("/api/me", headers=headers(other_token)).status_code == 200
+        assert client.get("/api/auth/me", headers=headers(other_token)).status_code == 200
 
     unchanged = client.get(
         f"/api/admin/users/{owner['id']}",

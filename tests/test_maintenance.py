@@ -60,7 +60,7 @@ def test_scheduled_maintenance_blocks_login_but_keeps_existing_api_available(
     assert blocked.json()["maintenance"]["state"] == "scheduled"
     assert blocked.headers["access-control-allow-origin"] == "http://127.0.0.1:5173"
     assert blocked.headers["retry-after"] == "30"
-    assert client.get("/api/me", headers=bearer(token)).status_code == 200
+    assert client.get("/api/auth/me", headers=bearer(token)).status_code == 200
 
 
 def test_active_maintenance_revokes_sessions_once_and_blocks_all_but_status_health_and_options(
@@ -140,5 +140,5 @@ def test_pending_maintenance_can_be_cancelled_without_revoking_sessions(
         assert window.sessions_revoked_count is None
         assert window.open_slot is None
 
-    assert client.get("/api/me", headers=bearer(token)).status_code == 200
+    assert client.get("/api/auth/me", headers=bearer(token)).status_code == 200
     assert client.get("/api/maintenance/status").json()["state"] == "available"

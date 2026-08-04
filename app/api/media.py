@@ -25,18 +25,6 @@ from app.schemas import MediaOut
 router = APIRouter(prefix="/media", tags=["media"])
 
 
-@router.get("", response_model=list[MediaOut])
-def list_media(
-    pullable_id: int | None = Query(default=None),
-    user: UserAccount = Depends(current_user),
-    db: Session = Depends(get_db),
-) -> list[MediaAsset]:
-    query = db.query(MediaAsset).order_by(MediaAsset.created_at.desc(), MediaAsset.id.desc())
-    if pullable_id is not None:
-        query = query.filter(MediaAsset.pullable_id == pullable_id)
-    return query.all()
-
-
 @router.get("/previews", response_model=list[MediaOut])
 def list_media_previews(
     pullable_id: list[int] = Query(default=[]),

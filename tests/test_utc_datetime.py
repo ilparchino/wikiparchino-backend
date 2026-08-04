@@ -147,8 +147,8 @@ def test_api_serializes_all_exposed_complete_timestamps_as_utc(
 
     profile = client.get("/api/profile", headers=headers)
     assert profile.status_code == 200
-    assert profile.json()["recent_activity"]
-    for item in profile.json()["recent_activity"]:
+    assert profile.json()["activity"]["items"]
+    for item in profile.json()["activity"]["items"]:
         assert_explicit_utc(item["occurred_at"])
 
     users = client.get("/api/admin/users", headers=headers)
