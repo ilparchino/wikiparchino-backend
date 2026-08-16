@@ -58,6 +58,11 @@ class ActivityAction(StrEnum):
     REPLACE_PEOPLE = "replace_people"
     REPLACE_GROUP_PEOPLE = "replace_group_people"
     REPLACE_GROUP_EPOCHS = "replace_group_epochs"
+    CHANGE_PARTICIPANTS = "change_participants"
+    CHANGE_PLACES = "change_places"
+    CHANGE_PEOPLE = "change_people"
+    CHANGE_GROUP_PEOPLE = "change_group_people"
+    CHANGE_GROUP_EPOCHS = "change_group_epochs"
     UPLOAD_MEDIA = "upload_media"
     DELETE_MEDIA = "delete_media"
 
@@ -448,6 +453,9 @@ class PersonEvent(Base, AttributionMixin):
 
 class SocialGroupPerson(Base, AttributionMixin):
     __tablename__ = "social_group_person"
+    __table_args__ = (
+        Index("ix_social_group_person_person_group", "person_id", "group_id"),
+    )
 
     group_id: Mapped[int] = mapped_column(
         ForeignKey("social_group.id", ondelete="CASCADE", onupdate="CASCADE"),
@@ -456,7 +464,6 @@ class SocialGroupPerson(Base, AttributionMixin):
     person_id: Mapped[int] = mapped_column(
         ForeignKey("person.id", ondelete="CASCADE", onupdate="CASCADE"),
         primary_key=True,
-        index=True,
     )
 
     group: Mapped[SocialGroup] = relationship()
@@ -465,6 +472,9 @@ class SocialGroupPerson(Base, AttributionMixin):
 
 class SocialGroupEpoch(Base, AttributionMixin):
     __tablename__ = "social_group_epoch"
+    __table_args__ = (
+        Index("ix_social_group_epoch_epoch_group", "epoch_id", "group_id"),
+    )
 
     group_id: Mapped[int] = mapped_column(
         ForeignKey("social_group.id", ondelete="CASCADE", onupdate="CASCADE"),
@@ -473,7 +483,6 @@ class SocialGroupEpoch(Base, AttributionMixin):
     epoch_id: Mapped[int] = mapped_column(
         ForeignKey("epoch.id", ondelete="CASCADE", onupdate="CASCADE"),
         primary_key=True,
-        index=True,
     )
 
     group: Mapped[SocialGroup] = relationship()
@@ -511,6 +520,8 @@ class ActivityLog(Base):
         CheckConstraint(
             "action in ('create', 'update', 'delete', 'replace_participants', "
             "'replace_places', 'replace_people', 'replace_group_people', 'replace_group_epochs', "
+            "'change_participants', 'change_places', 'change_people', "
+            "'change_group_people', 'change_group_epochs', "
             "'upload_media', 'delete_media')",
             name="ck_activity_log_action",
         ),

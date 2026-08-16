@@ -333,3 +333,41 @@ def test_admin_summary_uses_one_database_round_trip(auth_client: httpx.Client) -
 
     assert statements == 1
     assert summary.total_users >= 1
+
+
+def test_relationship_hydration_query_count_is_independent_of_page_size(
+    auth_client: httpx.Client,
+) -> None:
+    from app.api.relationships import list_event_participants
+    def select_statements(page_size: int) -> list[str]:
+        statements: list[str] = []
+
+        def collect_selects(conn, cursor, statement, parameters, context, executemany):
+            if statement.lstrip().upper().startswith("SELECT"):
+                statements.append(statement)
+
+        with database.SessionLocal() as db:
+            admin = db.query(UserAccount).filter_by(username="admin").one()
+            event_id = db.query(Event.id).order_by(Event.id).scalar()
+            sqlalchemy_event.listen(database.engine, "before_cursor_execute", collect_selects)
+            try:
+                list_event_participants(
+                    event_id=event_id,
+                    page_number=1,
+                    page_size=page_size,
+                    q=None,
+                    sex=None,
+                    connotation=None,
+                    sort="alias",
+                    order="asc",
+                    user=admin,
+                    db=db,
+                )
+            finally:
+                sqlalchemy_event.remove(database.engine, "before_cursor_execute", collect_selects)
+        return statements
+
+    one_item = select_statements(1)
+    full_page = select_statements(100)
+    assert len(one_item) == len(full_page)
+    assert not any("media_asset" in statement.lower() for statement in full_page)

@@ -371,59 +371,172 @@ class OptionalParticipantRole(BaseModel):
         return normalized or None
 
 
-class EventParticipantIn(OptionalParticipantRole):
+class RelatedPersonOut(BaseModel):
+    id: int
+    alias: str
+    name: str | None = None
+    surname: str | None = None
+    sex: Sex
+    connotation: Connotation
+
+    model_config = {"from_attributes": True}
+
+
+class RelatedPlaceOut(BaseModel):
+    id: int
+    name: str
+    address: str | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class RelatedEpochOut(BaseModel):
+    id: int
+    name: str
+    start_year: int | None = None
+    start_month: int | None = None
+    start_day: int | None = None
+    end_year: int | None = None
+    end_month: int | None = None
+    end_day: int | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class RelatedEventOut(BaseModel):
+    id: int
+    title: str
+    place_id: int
+    epoch_id: int
+    year: int | None = None
+    month: int | None = None
+    day: int | None = None
+    place_name: str
+    epoch_name: str
+
+
+class RelatedGroupOut(BaseModel):
+    id: int
+    name: str
+
+    model_config = {"from_attributes": True}
+
+
+class EventParticipantChange(OptionalParticipantRole):
     person_id: int
     motivation: str | None = None
 
 
-class EventParticipantOut(EventParticipantIn):
+class EventParticipantOut(OptionalParticipantRole):
     event_id: int
-    person: PersonOut | None = None
-
-    model_config = {"from_attributes": True}
+    person_id: int
+    motivation: str | None = None
+    person: RelatedPersonOut
 
 
 class PersonEventOut(OptionalParticipantRole):
     person_id: int
     event_id: int
     motivation: str | None = None
-    event: EventOut | None = None
-
-    model_config = {"from_attributes": True}
+    event: RelatedEventOut
 
 
-class PersonPlaceIn(BaseModel):
+class PersonPlaceChange(BaseModel):
     place_id: int
     motivation: str | None = None
 
 
-class PersonPlaceOut(PersonPlaceIn):
+class PersonPlaceOut(PersonPlaceChange):
     person_id: int
-    place: PlaceOut | None = None
-
-    model_config = {"from_attributes": True}
+    place: RelatedPlaceOut
 
 
 class PlacePersonOut(BaseModel):
     person_id: int
     place_id: int
     motivation: str | None = None
-    person: PersonOut | None = None
-
-    model_config = {"from_attributes": True}
+    person: RelatedPersonOut
 
 
-class PlacePersonIn(BaseModel):
+class PlacePersonChange(BaseModel):
     person_id: int
     motivation: str | None = None
 
 
-class GroupPeopleUpdate(BaseModel):
-    person_ids: list[int]
+def validate_delta_ids(
+    add_ids: list[int], update_ids: list[int], remove_ids: list[int]
+) -> None:
+    sections = (("add", add_ids), ("update", update_ids), ("remove_ids", remove_ids))
+    for name, values in sections:
+        if len(values) != len(set(values)):
+            raise ValueError(f"La sezione {name} contiene ID duplicati")
+    if (set(add_ids) & set(update_ids)) or (set(add_ids) & set(remove_ids)) or (
+        set(update_ids) & set(remove_ids)
+    ):
+        raise ValueError("Lo stesso collegamento non può comparire in più operazioni")
+    if len(add_ids) + len(update_ids) + len(remove_ids) > 500:
+        raise ValueError("Una modifica può interessare al massimo 500 collegamenti")
 
 
-class GroupEpochsUpdate(BaseModel):
-    epoch_ids: list[int]
+class EventParticipantChangeset(BaseModel):
+    add: list[EventParticipantChange] = Field(default_factory=list)
+    update: list[EventParticipantChange] = Field(default_factory=list)
+    remove_ids: list[int] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_operations(self) -> EventParticipantChangeset:
+        validate_delta_ids(
+            [item.person_id for item in self.add],
+            [item.person_id for item in self.update],
+            self.remove_ids,
+        )
+        return self
+
+
+class PersonPlaceChangeset(BaseModel):
+    add: list[PersonPlaceChange] = Field(default_factory=list)
+    update: list[PersonPlaceChange] = Field(default_factory=list)
+    remove_ids: list[int] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_operations(self) -> PersonPlaceChangeset:
+        validate_delta_ids(
+            [item.place_id for item in self.add],
+            [item.place_id for item in self.update],
+            self.remove_ids,
+        )
+        return self
+
+
+class PlacePersonChangeset(BaseModel):
+    add: list[PlacePersonChange] = Field(default_factory=list)
+    update: list[PlacePersonChange] = Field(default_factory=list)
+    remove_ids: list[int] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_operations(self) -> PlacePersonChangeset:
+        validate_delta_ids(
+            [item.person_id for item in self.add],
+            [item.person_id for item in self.update],
+            self.remove_ids,
+        )
+        return self
+
+
+class MembershipChangeset(BaseModel):
+    add_ids: list[int] = Field(default_factory=list)
+    remove_ids: list[int] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_operations(self) -> MembershipChangeset:
+        validate_delta_ids(self.add_ids, [], self.remove_ids)
+        return self
+
+
+class RelationshipChangeOut(BaseModel):
+    created: int
+    updated: int
+    deleted: int
 
 
 class SearchResult(BaseModel):

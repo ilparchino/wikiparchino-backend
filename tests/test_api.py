@@ -193,36 +193,36 @@ def test_group_crud_relationships_search_pulls_and_activity(
     person_updated_at = people[0]["updated_at"]
     epoch_updated_at = epochs[0]["updated_at"]
 
-    replaced_people = auth_client.put(
+    replaced_people = auth_client.patch(
         f"/api/groups/{group_id}/people",
-        json={"person_ids": person_ids},
+        json={"add_ids": person_ids, "remove_ids": []},
     )
     assert replaced_people.status_code == 200
-    assert [person["id"] for person in replaced_people.json()] == person_ids
-    replaced_epochs = auth_client.put(
+    assert replaced_people.json() == {"created": 2, "updated": 0, "deleted": 0}
+    replaced_epochs = auth_client.patch(
         f"/api/groups/{group_id}/epochs",
-        json={"epoch_ids": epoch_ids},
+        json={"add_ids": epoch_ids, "remove_ids": []},
     )
     assert replaced_epochs.status_code == 200
-    assert [epoch["id"] for epoch in replaced_epochs.json()] == epoch_ids
+    assert replaced_epochs.json() == {"created": 1, "updated": 0, "deleted": 0}
 
-    duplicate = auth_client.put(
+    duplicate = auth_client.patch(
         f"/api/groups/{group_id}/people",
-        json={"person_ids": [person_ids[0], person_ids[0]]},
+        json={"add_ids": [person_ids[0], person_ids[0]], "remove_ids": []},
     )
     assert duplicate.status_code == 422
-    missing = auth_client.put(
+    missing = auth_client.patch(
         f"/api/groups/{group_id}/epochs",
-        json={"epoch_ids": [999999]},
+        json={"add_ids": [999999], "remove_ids": []},
     )
     assert missing.status_code == 422
-    assert [person["id"] for person in auth_client.get(f"/api/groups/{group_id}/people").json()] == person_ids
-    assert [epoch["id"] for epoch in auth_client.get(f"/api/groups/{group_id}/epochs").json()] == epoch_ids
+    assert [person["id"] for person in auth_client.get(f"/api/groups/{group_id}/people").json()["items"]] == person_ids
+    assert [epoch["id"] for epoch in auth_client.get(f"/api/groups/{group_id}/epochs").json()["items"]] == epoch_ids
 
     reciprocal_people = auth_client.get(f"/api/people/{person_ids[0]}/groups")
     reciprocal_epochs = auth_client.get(f"/api/epochs/{epoch_ids[0]}/groups")
-    assert any(item["id"] == group_id for item in reciprocal_people.json())
-    assert any(item["id"] == group_id for item in reciprocal_epochs.json())
+    assert any(item["id"] == group_id for item in reciprocal_people.json()["items"])
+    assert any(item["id"] == group_id for item in reciprocal_epochs.json()["items"])
     assert auth_client.get(f"/api/people/{person_ids[0]}").json()["updated_at"] == person_updated_at
     assert auth_client.get(f"/api/epochs/{epoch_ids[0]}").json()["updated_at"] == epoch_updated_at
 
@@ -235,7 +235,7 @@ def test_group_crud_relationships_search_pulls_and_activity(
             db.query(ActivityLog)
             .filter_by(
                 entity_id=group_id,
-                action=ActivityAction.REPLACE_GROUP_PEOPLE.value,
+                action=ActivityAction.CHANGE_GROUP_PEOPLE.value,
             )
             .one()
         )
@@ -243,7 +243,7 @@ def test_group_crud_relationships_search_pulls_and_activity(
             db.query(ActivityLog)
             .filter_by(
                 entity_id=group_id,
-                action=ActivityAction.REPLACE_GROUP_EPOCHS.value,
+                action=ActivityAction.CHANGE_GROUP_EPOCHS.value,
             )
             .one()
         )
@@ -316,9 +316,9 @@ def test_related_content_changes_touch_expected_entities(
     person_before_participants = auth_client.get(
         f"/api/people/{people[0]['id']}"
     ).json()
-    participants = auth_client.put(
+    participants = auth_client.patch(
         f"/api/events/{event['id']}/participants",
-        json=[{"person_id": people[0]["id"], "role": "Guida", "motivation": None}],
+        json={"add": [], "update": [{"person_id": people[0]["id"], "role": "Guida", "motivation": None}], "remove_ids": []},
     )
     assert participants.status_code == 200
     event_after_participants = auth_client.get(f"/api/events/{event['id']}").json()
@@ -336,9 +336,9 @@ def test_related_content_changes_touch_expected_entities(
 
     person_before_places = person_after_participants
     place_before_link = auth_client.get(f"/api/places/{places[0]['id']}").json()
-    linked = auth_client.put(
+    linked = auth_client.patch(
         f"/api/people/{people[0]['id']}/places",
-        json=[{"place_id": places[0]["id"], "motivation": "Luogo collegato"}],
+        json={"add": [{"place_id": places[0]["id"], "motivation": "Luogo collegato"}], "update": [], "remove_ids": []},
     )
     assert linked.status_code == 200
     person_after_places = auth_client.get(f"/api/people/{people[0]['id']}").json()
@@ -376,43 +376,42 @@ def test_person_place_replacement_from_both_sides_tracks_changed_counterparts(
     person_one, person_two = people[:2]
     place_one, place_two = places[:2]
 
-    added = auth_client.put(
+    added = auth_client.patch(
         f"/api/people/{person_one['id']}/places",
-        json=[{"place_id": place_one["id"], "motivation": "Prima motivazione"}],
+        json={"add": [{"place_id": place_one["id"], "motivation": "Prima motivazione"}], "update": [], "remove_ids": []},
     )
     assert added.status_code == 200
     first_person_update = auth_client.get(f"/api/people/{person_one['id']}").json()["updated_at"]
     first_place_update = auth_client.get(f"/api/places/{place_one['id']}").json()["updated_at"]
     untouched_place_update = auth_client.get(f"/api/places/{place_two['id']}").json()["updated_at"]
 
-    unchanged = auth_client.put(
+    unchanged = auth_client.patch(
         f"/api/people/{person_one['id']}/places",
-        json=[{"place_id": place_one["id"], "motivation": "Prima motivazione"}],
+        json={"add": [], "update": [{"place_id": place_one["id"], "motivation": "Prima motivazione"}], "remove_ids": []},
     )
     assert unchanged.status_code == 200
-    assert parse_timestamp(auth_client.get(f"/api/people/{person_one['id']}").json()["updated_at"]) > parse_timestamp(first_person_update)
+    assert auth_client.get(f"/api/people/{person_one['id']}").json()["updated_at"] == first_person_update
     assert auth_client.get(f"/api/places/{place_one['id']}").json()["updated_at"] == first_place_update
     assert auth_client.get(f"/api/places/{place_two['id']}").json()["updated_at"] == untouched_place_update
 
-    replaced = auth_client.put(
+    replaced = auth_client.patch(
         f"/api/places/{place_one['id']}/people",
-        json=[{"person_id": person_two["id"], "motivation": "Nuovo collegamento"}],
+        json={"add": [{"person_id": person_two["id"], "motivation": "Nuovo collegamento"}], "update": [], "remove_ids": [person_one["id"]]},
     )
     assert replaced.status_code == 200
-    assert replaced.json()[0]["person_id"] == person_two["id"]
-    assert replaced.json()[0]["motivation"] == "Nuovo collegamento"
+    assert replaced.json() == {"created": 1, "updated": 0, "deleted": 1}
 
-    duplicate = auth_client.put(
+    duplicate = auth_client.patch(
         f"/api/places/{place_one['id']}/people",
-        json=[
+        json={"add": [
             {"person_id": person_two["id"], "motivation": None},
             {"person_id": person_two["id"], "motivation": None},
-        ],
+        ], "update": [], "remove_ids": []},
     )
     assert duplicate.status_code == 422
-    missing = auth_client.put(
+    missing = auth_client.patch(
         f"/api/places/{place_one['id']}/people",
-        json=[{"person_id": 999999, "motivation": None}],
+        json={"add": [{"person_id": 999999, "motivation": None}], "update": [], "remove_ids": []},
     )
     assert missing.status_code == 422
 
@@ -423,19 +422,19 @@ def test_person_place_replacement_from_both_sides_tracks_changed_counterparts(
         link = db.query(PersonPlace).filter_by(place_id=place_one["id"]).one()
         place_log = (
             db.query(ActivityLog)
-            .filter_by(entity_id=place_one["id"], action=ActivityAction.REPLACE_PEOPLE.value)
+            .filter_by(entity_id=place_one["id"], action=ActivityAction.CHANGE_PEOPLE.value)
             .order_by(ActivityLog.id.desc())
             .first()
         )
         removed_person_log = (
             db.query(ActivityLog)
-            .filter_by(entity_id=person_one["id"], action=ActivityAction.REPLACE_PLACES.value)
+            .filter_by(entity_id=person_one["id"], action=ActivityAction.CHANGE_PLACES.value)
             .order_by(ActivityLog.id.desc())
             .first()
         )
         added_person_log = (
             db.query(ActivityLog)
-            .filter_by(entity_id=person_two["id"], action=ActivityAction.REPLACE_PLACES.value)
+            .filter_by(entity_id=person_two["id"], action=ActivityAction.CHANGE_PLACES.value)
             .order_by(ActivityLog.id.desc())
             .first()
         )
@@ -468,9 +467,9 @@ def test_delete_cascades_media_and_relationship_rows(auth_client: httpx.Client, 
         },
     ).json()
     place = auth_client.get("/api/places").json()["items"][0]
-    linked = auth_client.put(
+    linked = auth_client.patch(
         f"/api/people/{person['id']}/places",
-        json=[{"place_id": place["id"], "motivation": "Test cascade"}],
+        json={"add": [{"place_id": place["id"], "motivation": "Test cascade"}], "update": [], "remove_ids": []},
     )
     assert linked.status_code == 200
 
@@ -496,7 +495,7 @@ def test_delete_cascades_media_and_relationship_rows(auth_client: httpx.Client, 
     assert auth_client.get(f"/api/media/{media_id}").status_code == 404
     reverse_links = auth_client.get(f"/api/places/{place['id']}/people")
     assert reverse_links.status_code == 200
-    assert all(item["person_id"] != person["id"] for item in reverse_links.json())
+    assert all(item["person_id"] != person["id"] for item in reverse_links.json()["items"])
 
 
 def test_event_requires_existing_place_and_epoch(auth_client: httpx.Client) -> None:
@@ -761,12 +760,12 @@ def test_event_epoch_range_validation_and_epoch_update_conflicts(
 def test_relationships_and_pulls(auth_client: httpx.Client) -> None:
     people = auth_client.get("/api/people").json()["items"]
     events = auth_client.get("/api/events").json()["items"]
-    response = auth_client.put(
+    response = auth_client.patch(
         f"/api/events/{events[0]['id']}/participants",
-        json=[{"person_id": people[0]["id"], "role": "Guida", "motivation": "Test"}],
+        json={"add": [], "update": [{"person_id": people[0]["id"], "role": "Guida", "motivation": "Test"}], "remove_ids": []},
     )
     assert response.status_code == 200
-    assert response.json()[0]["person_id"] == people[0]["id"]
+    assert response.json()["updated"] == 1
     assert auth_client.get(f"/api/people/{people[0]['id']}/events").status_code == 200
 
     random_pull = auth_client.get("/api/pulls/random")
@@ -776,45 +775,141 @@ def test_relationships_and_pulls(auth_client: httpx.Client) -> None:
     assert daily_pull.json()["mode"] == "daily"
 
 
+def test_relationship_pages_candidates_deltas_and_removed_legacy_routes(
+    auth_client: httpx.Client,
+) -> None:
+    event = auth_client.get("/api/events").json()["items"][0]
+    created_person = auth_client.post(
+        "/api/people",
+        json={
+            "alias": "Candidato relazione",
+            "name": "Nome candidato",
+            "surname": None,
+            "sex": "other",
+            "connotation": "neutral",
+            "description": "Descrizione che non deve apparire nel riepilogo",
+            "rarity": 1,
+        },
+    ).json()
+
+    candidates = auth_client.get(
+        f"/api/events/{event['id']}/participants/candidates",
+        params={"q": "Candidato", "limit": 20},
+    )
+    assert candidates.status_code == 200
+    assert [item["id"] for item in candidates.json()] == [created_person["id"]]
+
+    added = auth_client.patch(
+        f"/api/events/{event['id']}/participants",
+        json={
+            "add": [{"person_id": created_person["id"], "role": "Osservatore", "motivation": "Test"}],
+            "update": [],
+            "remove_ids": [],
+        },
+    )
+    assert added.status_code == 200
+    assert added.json() == {"created": 1, "updated": 0, "deleted": 0}
+
+    first_page = auth_client.get(
+        f"/api/events/{event['id']}/participants",
+        params={"page": 1, "page_size": 1, "q": "Osservatore", "sort": "role", "order": "asc"},
+    )
+    assert first_page.status_code == 200
+    assert first_page.json()["total"] == 1
+    summary = first_page.json()["items"][0]
+    assert summary["person"]["id"] == created_person["id"]
+    assert "description" not in summary["person"]
+    assert "media_ids" not in summary["person"]
+    assert "rarity" not in summary["person"]
+
+    assert auth_client.get(
+        f"/api/events/{event['id']}/participants/candidates",
+        params={"q": "Candidato"},
+    ).json() == []
+    assert auth_client.patch(
+        f"/api/events/{event['id']}/participants",
+        json={"add": [{"person_id": created_person["id"]}], "update": [], "remove_ids": []},
+    ).status_code == 409
+
+    event_before = auth_client.get(f"/api/events/{event['id']}").json()["updated_at"]
+    no_op = auth_client.patch(
+        f"/api/events/{event['id']}/participants",
+        json={
+            "add": [],
+            "update": [{"person_id": created_person["id"], "role": "Osservatore", "motivation": "Test"}],
+            "remove_ids": [],
+        },
+    )
+    assert no_op.json() == {"created": 0, "updated": 0, "deleted": 0}
+    assert auth_client.get(f"/api/events/{event['id']}").json()["updated_at"] == event_before
+
+    removed = auth_client.patch(
+        f"/api/events/{event['id']}/participants",
+        json={"add": [], "update": [], "remove_ids": [created_person["id"]]},
+    )
+    assert removed.json() == {"created": 0, "updated": 0, "deleted": 1}
+    assert auth_client.put(f"/api/events/{event['id']}/participants", json=[]).status_code == 405
+    assert auth_client.get(f"/api/places/{event['place_id']}/events").status_code == 404
+    assert auth_client.get(f"/api/epochs/{event['epoch_id']}/events").status_code == 404
+
+    people = auth_client.get("/api/people").json()["items"]
+    places = auth_client.get("/api/places").json()["items"]
+    epochs = auth_client.get("/api/epochs").json()["items"]
+    groups = auth_client.get("/api/groups").json()["items"]
+    checks = (
+        f"/api/people/{people[0]['id']}/events",
+        f"/api/people/{people[0]['id']}/places",
+        f"/api/places/{places[0]['id']}/people",
+        f"/api/groups/{groups[0]['id']}/people",
+        f"/api/groups/{groups[0]['id']}/epochs",
+        f"/api/people/{people[0]['id']}/groups",
+        f"/api/epochs/{epochs[0]['id']}/groups",
+    )
+    for path in checks:
+        payload = auth_client.get(path, params={"page": 1, "page_size": 1}).json()
+        assert set(payload) == {"items", "total", "page", "page_size"}
+        assert payload["page_size"] == 1
+
+
 def test_participant_roles_are_optional_free_form_strings(auth_client: httpx.Client) -> None:
     people = auth_client.get("/api/people").json()["items"]
     event = auth_client.get("/api/events").json()["items"][0]
 
-    response = auth_client.put(
+    response = auth_client.patch(
         f"/api/events/{event['id']}/participants",
-        json=[
+        json={"add": [], "update": [
             {"person_id": people[0]["id"], "role": "  Leader  ", "motivation": None},
             {"person_id": people[1]["id"], "role": "   ", "motivation": None},
             {"person_id": people[2]["id"], "motivation": None},
-        ],
+        ], "remove_ids": []},
     )
     assert response.status_code == 200
-    roles = {item["person_id"]: item["role"] for item in response.json()}
+    roles = {item["person_id"]: item["role"] for item in auth_client.get(f"/api/events/{event['id']}/participants").json()["items"]}
     assert roles[people[0]["id"]] == "Leader"
     assert roles[people[1]["id"]] is None
     assert roles[people[2]["id"]] is None
 
     person_events = auth_client.get(f"/api/people/{people[0]['id']}/events")
     assert person_events.status_code == 200
-    assert next(item for item in person_events.json() if item["event_id"] == event["id"])["role"] == "Leader"
+    assert next(item for item in person_events.json()["items"] if item["event_id"] == event["id"])["role"] == "Leader"
 
-    explicit_null = auth_client.put(
+    explicit_null = auth_client.patch(
         f"/api/events/{event['id']}/participants",
-        json=[{"person_id": people[0]["id"], "role": None, "motivation": None}],
+        json={"add": [], "update": [{"person_id": people[0]["id"], "role": None, "motivation": None}], "remove_ids": []},
     )
     assert explicit_null.status_code == 200
-    assert explicit_null.json()[0]["role"] is None
+    assert explicit_null.json()["updated"] == 1
 
-    max_length = auth_client.put(
+    max_length = auth_client.patch(
         f"/api/events/{event['id']}/participants",
-        json=[{"person_id": people[0]["id"], "role": f"  {'x' * 255}  ", "motivation": None}],
+        json={"add": [], "update": [{"person_id": people[0]["id"], "role": f"  {'x' * 255}  ", "motivation": None}], "remove_ids": []},
     )
     assert max_length.status_code == 200
-    assert max_length.json()[0]["role"] == "x" * 255
+    assert max_length.json()["updated"] == 1
 
-    too_long = auth_client.put(
+    too_long = auth_client.patch(
         f"/api/events/{event['id']}/participants",
-        json=[{"person_id": people[0]["id"], "role": "x" * 256, "motivation": None}],
+        json={"add": [], "update": [{"person_id": people[0]["id"], "role": "x" * 256, "motivation": None}], "remove_ids": []},
     )
     assert too_long.status_code == 422
 

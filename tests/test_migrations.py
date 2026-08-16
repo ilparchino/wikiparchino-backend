@@ -893,6 +893,7 @@ def test_pullable_query_indexes_upgrade_and_downgrade(
         assert connection.exec_driver_sql("pragma foreign_key_check").all() == []
     engine.dispose()
 
+
     command.downgrade(config, "0010_place_people_activity")
     engine = create_engine(database_url)
     with engine.connect() as connection:
@@ -902,4 +903,53 @@ def test_pullable_query_indexes_upgrade_and_downgrade(
             ).scalars()
         )
         assert expected.isdisjoint(present)
+    engine.dispose()
+
+
+def test_relationship_pagination_migration_replaces_indexes_and_guards_downgrade(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    db_path = tmp_path / "relationship-pagination.sqlite"
+    database_url = f"sqlite:///{db_path}"
+    monkeypatch.setenv("WIKI_PARCHINO_DATABASE_URL", database_url)
+    backend_dir = Path(__file__).resolve().parents[1]
+    config = migration_config(backend_dir)
+    command.upgrade(config, "0011_pullable_query_indexes")
+    command.upgrade(config, "head")
+
+    engine = create_engine(database_url)
+    with engine.begin() as connection:
+        indexes = set(connection.execute(text("select name from sqlite_master where type='index'")).scalars())
+        assert "ix_social_group_person_person_group" in indexes
+        assert "ix_social_group_epoch_epoch_group" in indexes
+        assert "ix_social_group_person_person_id" not in indexes
+        assert "ix_social_group_epoch_epoch_id" not in indexes
+        table_sql = connection.execute(text("select sql from sqlite_master where type='table' and name='activity_log'")).scalar_one()
+        assert "change_participants" in table_sql
+        connection.execute(
+            text(
+                "insert into activity_log (entity_type, entity_id, action, occurred_at) "
+                "values ('event', 1, 'change_participants', '2026-08-16 10:00:00')"
+            )
+        )
+        assert connection.exec_driver_sql("pragma foreign_key_check").all() == []
+    engine.dispose()
+
+    with pytest.raises(RuntimeError, match="delta relationship activity"):
+        command.downgrade(config, "0011_pullable_query_indexes")
+
+    engine = create_engine(database_url)
+    with engine.begin() as connection:
+        connection.execute(text("delete from activity_log where action = 'change_participants'"))
+    engine.dispose()
+    command.downgrade(config, "0011_pullable_query_indexes")
+
+    engine = create_engine(database_url)
+    with engine.connect() as connection:
+        indexes = set(connection.execute(text("select name from sqlite_master where type='index'")).scalars())
+        assert "ix_social_group_person_person_id" in indexes
+        assert "ix_social_group_epoch_epoch_id" in indexes
+        assert "ix_social_group_person_person_group" not in indexes
+        assert "ix_social_group_epoch_epoch_group" not in indexes
     engine.dispose()

@@ -99,9 +99,9 @@ def test_relationship_and_media_changes_are_profile_updates(
 ) -> None:
     event = auth_client.get("/api/events").json()["items"][0]
     person = auth_client.get("/api/people").json()["items"][0]
-    replaced = auth_client.put(
+    replaced = auth_client.patch(
         f"/api/events/{event['id']}/participants",
-        json=[{"person_id": person["id"], "role": "Guida", "motivation": None}],
+        json={"add": [], "update": [{"person_id": person["id"], "role": "Guida", "motivation": None}], "remove_ids": []},
     )
     assert replaced.status_code == 200
     activity = auth_client.get("/api/profile").json()["activity"]["items"]
@@ -110,9 +110,10 @@ def test_relationship_and_media_changes_are_profile_updates(
     assert activity[0]["action"] == "updated"
 
     group = auth_client.get("/api/groups").json()["items"][0]
-    replaced_group = auth_client.put(
+    second_person = auth_client.get("/api/people").json()["items"][1]
+    replaced_group = auth_client.patch(
         f"/api/groups/{group['id']}/people",
-        json={"person_ids": [person["id"]]},
+        json={"add_ids": [second_person["id"]], "remove_ids": []},
     )
     assert replaced_group.status_code == 200
     activity = auth_client.get("/api/profile").json()["activity"]["items"]
@@ -280,12 +281,12 @@ def test_logged_operations_share_the_exact_operation_timestamp(
 
     event = auth_client.get("/api/events").json()["items"][0]
     people = auth_client.get("/api/people").json()["items"][:2]
-    replaced = auth_client.put(
+    replaced = auth_client.patch(
         f"/api/events/{event['id']}/participants",
-        json=[
+        json={"add": [], "update": [
             {"person_id": person["id"], "role": None, "motivation": None}
             for person in people
-        ],
+        ], "remove_ids": []},
     )
     assert replaced.status_code == 200
     with SessionLocal() as db:
@@ -295,22 +296,24 @@ def test_logged_operations_share_the_exact_operation_timestamp(
             .filter_by(
                 entity_type="event",
                 entity_id=event["id"],
-                action="replace_participants",
+                action="change_participants",
             )
             .order_by(ActivityLog.id.desc())
             .first()
         )
         links = db.query(PersonEvent).filter_by(event_id=event["id"]).all()
         assert links
+        changed_person_ids = {person["id"] for person in people}
         assert all(
-            link.created_at == link.updated_at == activity.occurred_at
+            link.updated_at == activity.occurred_at
             for link in links
+            if link.person_id in changed_person_ids
         )
         assert pullable.updated_at == activity.occurred_at
 
-    linked = auth_client.put(
+    linked = auth_client.patch(
         f"/api/people/{people[0]['id']}/places",
-        json=[{"place_id": place_id, "motivation": "Stesso istante"}],
+        json={"add": [{"place_id": place_id, "motivation": "Stesso istante"}], "update": [], "remove_ids": []},
     )
     assert linked.status_code == 200
     with SessionLocal() as db:
@@ -320,7 +323,7 @@ def test_logged_operations_share_the_exact_operation_timestamp(
             .filter_by(
                 entity_type="person",
                 entity_id=people[0]["id"],
-                action="replace_places",
+                action="change_places",
             )
             .order_by(ActivityLog.id.desc())
             .first()

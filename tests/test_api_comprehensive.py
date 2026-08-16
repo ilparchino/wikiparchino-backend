@@ -182,8 +182,6 @@ def test_protected_api_routes_reject_unauthenticated_requests(client: httpx.Clie
         "/api/people/1/places",
         "/api/people/1/groups",
         "/api/places/3/people",
-        "/api/places/3/events",
-        "/api/epochs/5/events",
         "/api/epochs/5/groups",
         "/api/search?q=parchino",
         "/api/pulls/random",
@@ -200,10 +198,10 @@ def test_protected_api_routes_reject_unauthenticated_requests(client: httpx.Clie
 
     assert_status(client.post("/api/auth/logout"), 401)
     assert_status(client.post("/api/people", json={"alias": "No auth", "rarity": 1.0}), 401)
-    assert_status(client.put("/api/people/1/places", json=[]), 401)
+    assert_status(client.patch("/api/people/1/places", json={"add": [], "update": [], "remove_ids": []}), 401)
     assert_status(client.post("/api/groups", json={"name": "No auth", "rarity": 1.0}), 401)
-    assert_status(client.put("/api/groups/7/people", json={"person_ids": []}), 401)
-    assert_status(client.put("/api/groups/7/epochs", json={"epoch_ids": []}), 401)
+    assert_status(client.patch("/api/groups/7/people", json={"add_ids": [], "remove_ids": []}), 401)
+    assert_status(client.patch("/api/groups/7/epochs", json={"add_ids": [], "remove_ids": []}), 401)
 
 
 def test_comprehensive_authenticated_api_scenario(client: httpx.Client) -> None:
@@ -291,15 +289,15 @@ def test_comprehensive_authenticated_api_scenario(client: httpx.Client) -> None:
     place = created_place.json()
     epoch = created_epoch.json()
 
-    linked_places = client.put(
+    linked_places = client.patch(
         f"/api/people/{person['id']}/places",
-        json=[{"place_id": place["id"], "motivation": "Verifica link persona-luogo"}],
+        json={"add": [{"place_id": place["id"], "motivation": "Verifica link persona-luogo"}], "update": [], "remove_ids": []},
     )
     assert_status(linked_places, 200)
-    assert linked_places.json()[0]["place_id"] == place["id"]
+    assert linked_places.json()["created"] == 1
     reverse_people = client.get(f"/api/places/{place['id']}/people")
     assert_status(reverse_people, 200)
-    assert any(item["person_id"] == person["id"] for item in reverse_people.json())
+    assert any(item["person_id"] == person["id"] for item in reverse_people.json()["items"])
 
     created_event = client.post(
         "/api/events",
@@ -320,23 +318,22 @@ def test_comprehensive_authenticated_api_scenario(client: httpx.Client) -> None:
     assert event["place"]["id"] == place["id"]
     assert event["epoch"]["id"] == epoch["id"]
 
-    participants = client.put(
+    participants = client.patch(
         f"/api/events/{event['id']}/participants",
-        json=[{"person_id": person["id"], "role": "Testimone", "motivation": "Protagonista del test"}],
+        json={"add": [{"person_id": person["id"], "role": "Testimone", "motivation": "Protagonista del test"}], "update": [], "remove_ids": []},
     )
     assert_status(participants, 200)
-    assert participants.json()[0]["person"]["id"] == person["id"]
-    assert participants.json()[0]["role"] == "Testimone"
+    assert participants.json()["created"] == 1
     person_events = client.get(f"/api/people/{person['id']}/events")
     assert_status(person_events, 200)
-    assert any(item["event_id"] == event["id"] for item in person_events.json())
+    assert any(item["event_id"] == event["id"] for item in person_events.json()["items"])
 
-    listed_place_events = client.get(f"/api/places/{place['id']}/events")
-    listed_epoch_events = client.get(f"/api/epochs/{epoch['id']}/events")
+    listed_place_events = client.get("/api/events", params={"place_id": place["id"]})
+    listed_epoch_events = client.get("/api/events", params={"epoch_id": epoch["id"]})
     assert_status(listed_place_events, 200)
     assert_status(listed_epoch_events, 200)
-    assert [item["id"] for item in listed_place_events.json()] == [event["id"]]
-    assert [item["id"] for item in listed_epoch_events.json()] == [event["id"]]
+    assert [item["id"] for item in listed_place_events.json()["items"]] == [event["id"]]
+    assert [item["id"] for item in listed_epoch_events.json()["items"]] == [event["id"]]
 
     uploaded = client.post(
         "/api/media",
@@ -373,7 +370,7 @@ def test_comprehensive_authenticated_api_scenario(client: httpx.Client) -> None:
     assert_status(client.get(f"/api/media/{media['id']}"), 404)
     person_events_after_delete = client.get(f"/api/people/{person['id']}/events")
     assert_status(person_events_after_delete, 200)
-    assert all(item["event_id"] != event["id"] for item in person_events_after_delete.json())
+    assert all(item["event_id"] != event["id"] for item in person_events_after_delete.json()["items"])
 
     assert_status(client.delete(f"/api/places/{place['id']}"), 204)
     assert_status(client.delete(f"/api/epochs/{epoch['id']}"), 204)
